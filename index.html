@@ -1,0 +1,544 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<title>Склад AI PRO SERVER</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #111111);
+    --hint: var(--tg-theme-hint-color, #8a8a8e);
+    --link: var(--tg-theme-link-color, #2481cc);
+    --btn: var(--tg-theme-button-color, #2481cc);
+    --btn-text: var(--tg-theme-button-text-color, #ffffff);
+    --sec: var(--tg-theme-secondary-bg-color, #f1f1f4);
+    --card: var(--tg-theme-section-bg-color, var(--bg));
+    --sep: rgba(127,127,127,.18);
+    --ok: #1f9d55; --warn: #e08a00; --bad: #d64545;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--sec); color: var(--text);
+    font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+  input, select, textarea { font: inherit; color: var(--text); }
+  .hidden { display: none !important; }
+
+  header { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 10px 12px 0;
+    box-shadow: 0 1px 0 var(--sep); }
+  .searchrow { display: flex; gap: 8px; align-items: center; }
+  .search { flex: 1; display: flex; align-items: center; gap: 6px; background: var(--sec);
+    border-radius: 10px; padding: 0 10px; height: 38px; }
+  .search input { flex: 1; border: 0; outline: 0; background: transparent; min-width: 0; height: 100%; }
+  .iconbtn { width: 38px; height: 38px; border-radius: 10px; background: var(--sec); font-size: 18px; }
+  .iconbtn.spin { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .tabs { display: flex; gap: 4px; margin-top: 10px; overflow-x: auto; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { padding: 8px 12px 10px; white-space: nowrap; color: var(--hint); border-bottom: 2px solid transparent; font-weight: 500; }
+  .tab.on { color: var(--btn); border-bottom-color: var(--btn); }
+
+  main { padding: 10px 12px 90px; }
+  .chips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 8px; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip { flex: none; padding: 6px 11px; border-radius: 16px; background: var(--card); white-space: nowrap; font-size: 14px; }
+  .chip.on { background: var(--btn); color: var(--btn-text); }
+  .chip small { opacity: .7; }
+  .summary { color: var(--hint); font-size: 13px; margin: 2px 2px 8px; display: flex; justify-content: space-between; gap: 8px; }
+  .summary label { display: flex; gap: 5px; align-items: center; white-space: nowrap; }
+
+  .list { background: var(--card); border-radius: 12px; overflow: hidden; }
+  .row { display: flex; gap: 10px; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--sep); width: 100%; text-align: left; }
+  .row:last-child { border-bottom: 0; }
+  .row .t { flex: 1; min-width: 0; }
+  .row .n { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
+  .row .m { color: var(--hint); font-size: 12px; margin-top: 2px; }
+  .qty { flex: none; min-width: 44px; text-align: center; padding: 4px 8px; border-radius: 8px; font-weight: 600; font-size: 14px;
+    background: rgba(31,157,85,.14); color: var(--ok); }
+  .qty.low { background: rgba(224,138,0,.15); color: var(--warn); }
+  .qty.zero { background: rgba(127,127,127,.15); color: var(--hint); }
+  .more { text-align: center; color: var(--hint); font-size: 13px; padding: 12px; }
+  h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .03em; color: var(--hint); margin: 16px 4px 6px; font-weight: 600; }
+  .empty { text-align: center; color: var(--hint); padding: 40px 16px; }
+
+  /* Карточка товара */
+  #page { position: fixed; inset: 0; z-index: 10; background: var(--sec); overflow-y: auto; padding: 12px 12px 90px; }
+  .back { color: var(--link); padding: 4px 0 10px; }
+  .card { background: var(--card); border-radius: 12px; padding: 14px; margin-bottom: 10px; }
+  .card .title { font-size: 17px; font-weight: 600; white-space: pre-line; word-break: break-word; }
+  .conf { white-space: pre-line; margin-top: 8px; font-size: 14px; }
+  .kv { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--sep); }
+  .kv:last-child { border-bottom: 0; }
+  .kv span:first-child { color: var(--hint); }
+  .kv span:last-child { text-align: right; word-break: break-word; }
+  .big { font-size: 28px; font-weight: 700; }
+  .ops { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .op { background: var(--card); border-radius: 12px; padding: 12px 8px; font-weight: 500; }
+  .op.wide { grid-column: span 2; }
+  .field { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--sep); width: 100%; text-align: left; }
+  .field:last-child { border-bottom: 0; }
+  .field .h { color: var(--hint); flex: none; max-width: 45%; }
+  .field .v { text-align: right; word-break: break-word; white-space: pre-line; }
+  .field.edit .v::after { content: " ✏️"; font-size: 12px; }
+
+  /* Нижнее окно (операции, правка) */
+  #shade { position: fixed; inset: 0; z-index: 20; background: rgba(0,0,0,.4); display: flex; align-items: flex-end; }
+  #sheet { width: 100%; max-height: 92vh; overflow-y: auto; background: var(--bg); border-radius: 16px 16px 0 0;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom)); }
+  #sheet h2 { margin: 0 0 4px; font-size: 18px; }
+  .sub { color: var(--hint); font-size: 13px; margin-bottom: 12px; word-break: break-word; }
+  .stepper { display: flex; align-items: center; gap: 10px; margin: 6px 0 12px; }
+  .stepper button { width: 48px; height: 48px; border-radius: 12px; background: var(--sec); font-size: 24px; }
+  .stepper input { flex: 1; height: 48px; text-align: center; font-size: 22px; font-weight: 600; border: 0; border-radius: 12px; background: var(--sec); }
+  .inp { width: 100%; padding: 11px 12px; border: 0; border-radius: 10px; background: var(--sec); outline: 0; }
+  textarea.inp { min-height: 80px; resize: vertical; }
+  .lbl { font-size: 13px; color: var(--hint); margin: 10px 2px 4px; }
+  .preview { margin: 12px 2px; font-size: 15px; }
+  .btns { display: flex; gap: 8px; margin-top: 14px; }
+  .btn { flex: 1; height: 46px; border-radius: 12px; background: var(--btn); color: var(--btn-text); font-weight: 600; }
+  .btn.sec { background: var(--sec); color: var(--text); }
+  .btn:disabled { opacity: .5; }
+
+  #toast { position: fixed; left: 12px; right: 12px; bottom: calc(16px + env(safe-area-inset-bottom)); z-index: 30;
+    background: rgba(30,30,30,.92); color: #fff; padding: 12px 14px; border-radius: 12px; white-space: pre-line; font-size: 14px; }
+  .fatal { padding: 40px 20px; text-align: center; }
+  .fatal p { color: var(--hint); }
+  .stat { display: flex; gap: 8px; }
+  .stat .card { flex: 1; text-align: center; margin: 0; }
+  .stat .card div:last-child { color: var(--hint); font-size: 13px; }
+  .note { color: var(--hint); font-size: 13px; padding: 4px 4px 8px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header id="hdr" class="hidden">
+    <div class="searchrow">
+      <div class="search">🔎<input id="q" type="search" placeholder="Модель, P/N, объём…" autocomplete="off" enterkeyhint="search"></div>
+      <button class="iconbtn" id="refresh" title="Обновить">⟳</button>
+    </div>
+    <nav class="tabs" id="tabs"></nav>
+  </header>
+  <main id="main"><div class="empty">Загрузка склада…</div></main>
+</div>
+<div id="page" class="hidden"></div>
+<div id="shade" class="hidden"><div id="sheet"></div></div>
+<div id="toast" class="hidden"></div>
+
+<script>
+'use strict';
+// Адрес веб-приложения Apps Script (тот же, что у Telegram-бота)
+const API_URL = 'https://script.google.com/macros/s/AKfycbxzbPhxv0NFAqCPdbXx7AoWC_ecIhmXfdbz7mqJakzQp1oWA_oN9lEO3XKOrD_5EZ0/exec';
+const BOT = '@Aiproserverstock_bot';
+const CACHE_KEY = 'sklad_cache_v1';
+const LIST_LIMIT = 150;
+
+const OPS = {
+  in:   { name: 'Приход',   icon: '📥', sign: 1,  extra: 'Поставщик (необязательно)' },
+  sale: { name: 'Продажа',  icon: '📤', sign: -1, extra: 'Клиент (необязательно)' },
+  ret:  { name: 'Возврат',  icon: '↩️', sign: 1,  extra: 'От кого (необязательно)' },
+  wo:   { name: 'Списание', icon: '🗑', sign: -1, extra: 'Причина (необязательно)' },
+  cnt:  { name: 'Пересчёт', icon: '🧮', sign: 0,  extra: 'Комментарий (необязательно)' },
+};
+
+const tg = window.Telegram && window.Telegram.WebApp;
+const $ = id => document.getElementById(id);
+let D = null;              // данные склада
+let DEMO = false;
+let view = 'stock', cat = -1, showZero = false, query = '';
+let cur = null;            // открытая карточка
+let newSheet = -1;         // лист для нового товара
+let report = null, reportDays = 30;
+
+/* ---------- утилиты ---------- */
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const oneLine = s => String(s).replace(/\s*\n\s*/g, ' · ').replace(/\s+/g, ' ').trim();
+const canEdit = () => D && D.me.role !== 'просмотр';
+const sheetName = it => D.sheets[it.s].name.trim();
+const colNum = L => { let n = 0; for (const ch of L) n = n * 26 + ch.charCodeAt(0) - 64; return n; };
+function norm(s) {
+  return String(s).toLowerCase()
+    .replace(/ё/g, 'е').replace(/гб/g, 'gb').replace(/тб/g, 'tb')
+    .replace(/(\d),(\d)/g, '$1.$2')
+    .replace(/(\d)\s+(gb|tb|mb|w|ghz|mhz|g)\b/g, '$1$2')
+    .replace(/[,;()\[\]"'«»]/g, ' ')
+    .replace(/\s+/g, ' ').trim();
+}
+function haptic(type) { try { tg && tg.HapticFeedback.notificationOccurred(type); } catch (e) {} }
+let toastT = 0;
+function toast(msg, ms) {
+  const t = $('toast'); t.textContent = msg; t.classList.remove('hidden');
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), ms || 3500);
+}
+function conf(it) { const ci = D.sheets[it.s].conf; return ci >= 0 && it.v[ci] != null ? String(it.v[ci]).trim() : ''; }
+function qtyClass(q) { return q <= 0 ? 'zero' : (q <= D.lowQty ? 'low' : ''); }
+
+/* ---------- связь с таблицей ---------- */
+async function api(action, payload) {
+  if (DEMO) return demoApi(action, payload || {});
+  const body = JSON.stringify(Object.assign({ action: action, initData: tg.initData }, payload || {}));
+  let res;
+  try {
+    res = await fetch(API_URL + '?api=1', { method: 'POST', body: body });
+  } catch (e) { throw new Error('Нет связи с таблицей. Проверьте интернет.'); }
+  let j;
+  try { j = await res.json(); } catch (e) { throw new Error('Таблица ответила с ошибкой. Попробуйте ещё раз.'); }
+  if (!j.ok) { const err = new Error(j.error || 'Ошибка'); err.code = j.code; throw err; }
+  return j;
+}
+
+function setData(d) {
+  D = d;
+  D.items.forEach(it => {
+    it.hay = norm(D.sheets[it.s].name + ' ' + it.v.join(' '));
+    it.hayC = it.hay.replace(/[\s\-\/.]/g, '');
+  });
+  $('hdr').classList.remove('hidden');
+  renderTabs(); renderMain();
+  if (cur) { const f = D.items.find(x => x.s === cur.s && x.id === cur.id); cur = f || null; if (cur) renderItem(); else closePage(); }
+}
+function saveCache() {
+  if (DEMO || !D) return;
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ me: D.me, sheets: D.sheets, lowQty: D.lowQty, at: D.at,
+    items: D.items.map(({ hay, hayC, ...x }) => x) })); } catch (e) {}
+}
+function loadCache() { try { const s = localStorage.getItem(CACHE_KEY); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
+function clearCache() { try { localStorage.removeItem(CACHE_KEY); } catch (e) {} }
+
+let syncing = false;
+async function refresh(silent) {
+  if (syncing) return;
+  syncing = true; $('refresh').classList.add('spin');
+  try {
+    const j = await api('init');
+    delete j.ok;
+    setData(j); saveCache();
+    if (!silent) toast('✅ Склад обновлён', 1500);
+  } catch (e) {
+    if (e.code === 'auth' || e.code === 'noaccess') { clearCache(); D = null; fatal(e.message); }
+    else if (!D) fatal(e.message);
+    else toast('⚠️ ' + e.message);
+  } finally {
+    syncing = false; $('refresh').classList.remove('spin');
+  }
+}
+
+function fatal(msg) {
+  $('hdr').classList.add('hidden'); closePage(); closeSheet();
+  $('main').innerHTML = '<div class="fatal"><div style="font-size:42px">📦</div><h2>Склад</h2><p>' + esc(msg) + '</p></div>';
+}
+
+/* ---------- вкладки ---------- */
+function renderTabs() {
+  const t = [['stock', '📦 Склад'], ['low', '⚠️ Заканчивается'], ['sales', '📊 Продажи']];
+  if (canEdit()) t.push(['new', '➕ Новый']);
+  $('tabs').innerHTML = t.map(([k, l]) => '<button class="tab' + (view === k ? ' on' : '') + '" data-tab="' + k + '">' + l + '</button>').join('');
+}
+$('tabs').addEventListener('click', e => {
+  const b = e.target.closest('[data-tab]'); if (!b) return;
+  view = b.dataset.tab;
+  if (view !== 'stock') { query = ''; $('q').value = ''; }
+  renderTabs(); renderMain(); window.scrollTo(0, 0);
+  if (view === 'sales' && !report) loadReport(reportDays);
+});
+
+/* ---------- поиск ---------- */
+function search(text) {
+  const tokens = norm(text).split(' ').filter(Boolean);
+  if (!tokens.length) return [];
+  const found = [];
+  D.items.forEach(it => {
+    let hit = 0;
+    tokens.forEach(t => {
+      const tc = t.replace(/[\-\/.]/g, '');
+      if (it.hay.indexOf(t) >= 0 || (tc.length >= 4 && it.hayC.indexOf(tc) >= 0)) hit++;
+    });
+    if (hit) found.push({ it: it, hit: hit });
+  });
+  if (!found.length) return [];
+  found.sort((a, b) => b.hit - a.hit || b.it.q - a.it.q);
+  const exact = found.filter(f => f.hit === tokens.length);
+  if (exact.length) return exact.map(f => f.it);
+  const best = found[0].hit;
+  return found.filter(f => f.hit >= Math.max(1, best - (tokens.length > 2 ? 1 : 0))).map(f => f.it);
+}
+let qT = 0;
+$('q').addEventListener('input', e => {
+  clearTimeout(qT);
+  qT = setTimeout(() => {
+    query = e.target.value;
+    if (query.trim() && view !== 'stock') { view = 'stock'; renderTabs(); }
+    renderMain();
+  }, 120);
+});
+$('q').addEventListener('keydown', e => { if (e.key === 'Enter') e.target.blur(); });
+$('refresh').addEventListener('click', () => refresh(false));
+
+/* ---------- списки ---------- */
+function rowHtml(it, metaExtra) {
+  return '<button class="row" data-item="' + it.s + ':' + it.id + '"><div class="t"><div class="n">' + esc(oneLine(it.n)) + '</div>' +
+    '<div class="m">' + esc(sheetName(it)) + ' · ID ' + it.id + (metaExtra ? ' · ' + metaExtra : '') + '</div></div>' +
+    '<span class="qty ' + qtyClass(it.q) + '">' + (it.q > 0 ? it.q : '0') + '</span></button>';
+}
+function listHtml(items, metaFn) {
+  if (!items.length) return '<div class="empty">Ничего нет</div>';
+  const part = items.slice(0, LIST_LIMIT);
+  return '<div class="list">' + part.map(it => rowHtml(it, metaFn && metaFn(it))).join('') + '</div>' +
+    (items.length > LIST_LIMIT ? '<div class="more">Показано ' + LIST_LIMIT + ' из ' + items.length + ' — уточните поиск</div>' : '');
+}
+document.addEventListener('click', e => {
+  const r = e.target.closest('[data-item]'); if (!r) return;
+  const [s, id] = r.dataset.item.split(':').map(Number);
+  const it = D.items.find(x => x.s === s && x.id === id);
+  if (it) openItem(it);
+});
+
+function renderMain() {
+  if (!D) return;
+  const m = $('main');
+  if (view === 'stock') m.innerHTML = stockHtml();
+  else if (view === 'low') m.innerHTML = lowHtml();
+  else if (view === 'sales') m.innerHTML = salesHtml();
+  else if (view === 'new') m.innerHTML = newHtml();
+}
+
+function stockHtml() {
+  if (query.trim()) {
+    const res = search(query);
+    return '<div class="summary"><span>Найдено: ' + res.length + '</span></div>' +
+      (res.length ? listHtml(res) : '<div class="empty">По запросу «' + esc(query) + '» ничего не найдено.<br>Попробуйте короче — только модель или P/N.</div>');
+  }
+  const inStock = D.items.filter(it => it.q > 0);
+  let chips = '<button class="chip' + (cat === -1 ? ' on' : '') + '" data-cat="-1">Все <small>' + inStock.length + '</small></button>';
+  D.sheets.forEach((sh, i) => {
+    const n = D.items.filter(it => it.s === i && it.q > 0).length;
+    chips += '<button class="chip' + (cat === i ? ' on' : '') + '" data-cat="' + i + '">' + esc(sh.name.trim()) + ' <small>' + n + '</small></button>';
+  });
+  let items = D.items.filter(it => (cat === -1 || it.s === cat) && (showZero || it.q > 0));
+  const units = items.reduce((s, it) => s + Math.max(0, it.q), 0);
+  return '<div class="chips" id="chips">' + chips + '</div>' +
+    '<div class="summary"><span>' + items.length + ' поз. · ' + units + ' шт.</span>' +
+    '<label><input type="checkbox" id="zero"' + (showZero ? ' checked' : '') + '> с нулём</label></div>' +
+    listHtml(items);
+}
+document.addEventListener('click', e => {
+  const c = e.target.closest('[data-cat]'); if (!c) return;
+  cat = Number(c.dataset.cat); renderMain();
+});
+document.addEventListener('change', e => { if (e.target.id === 'zero') { showZero = e.target.checked; renderMain(); } });
+
+function lowHtml() {
+  const low = D.items.filter(it => it.q > 0 && it.q <= D.lowQty).sort((a, b) => b.s60 - a.s60 || a.q - b.q);
+  const out = D.items.filter(it => it.q <= 0 && it.s60 > 0).sort((a, b) => b.s60 - a.s60);
+  const meta = it => it.s60 ? 'продано за 60 дн.: ' + it.s60 : '';
+  return '<div class="note">Осталось ' + D.lowQty + ' шт. или меньше. Сначала то, что продавалось за 60 дней.</div>' +
+    '<h3>Заканчивается · ' + low.length + '</h3>' + listHtml(low, meta) +
+    (out.length ? '<h3>Закончились, но продавались · ' + out.length + '</h3>' + listHtml(out, meta) : '');
+}
+
+/* ---------- продажи ---------- */
+async function loadReport(days) {
+  reportDays = days; report = 'loading'; renderMain();
+  try { report = await api('report', { days: days }); }
+  catch (e) { report = null; toast('⚠️ ' + e.message); }
+  if (view === 'sales') renderMain();
+}
+function salesHtml() {
+  const per = [[7, '7 дней'], [30, '30 дней'], [90, '90 дней'], [365, 'Год']];
+  let h = '<div class="chips">' + per.map(([d, l]) => '<button class="chip' + (reportDays === d ? ' on' : '') + '" data-days="' + d + '">' + l + '</button>').join('') + '</div>';
+  if (report === 'loading' || !report) return h + '<div class="empty">' + (report ? 'Считаю…' : '') + '</div>';
+  const s = report.sale, a = report.arrival;
+  if (!s.total_operations && !a.total_operations) return h + '<div class="empty">За ' + report.days + ' дн. операций нет.<br>Статистика копится в листе «Журнал».</div>';
+  h += '<div class="stat"><div class="card"><div class="big">' + s.total_units + '</div><div>продано, шт.<br>' + s.total_operations + ' операций</div></div>' +
+    '<div class="card"><div class="big">' + a.total_units + '</div><div>пришло, шт.<br>' + a.total_operations + ' операций</div></div></div>';
+  const bs = Object.keys(s.by_sheet).sort((x, y) => s.by_sheet[y] - s.by_sheet[x]);
+  if (bs.length) h += '<h3>Продажи по категориям</h3><div class="card">' + bs.map(k => '<div class="kv"><span>' + esc(k) + '</span><span>' + s.by_sheet[k] + ' шт.</span></div>').join('') + '</div>';
+  if (s.top_items.length) h += '<h3>🏆 Топ продаж</h3><div class="card">' + s.top_items.slice(0, 15).map((x, i) =>
+    '<div class="kv"><span>' + (i + 1) + '. ' + esc(oneLine(x.name)) + '</span><span>' + x.qty + ' шт</span></div>').join('') + '</div>';
+  if (s.top_counterparties.length) h += '<h3>👤 Клиенты</h3><div class="card">' + s.top_counterparties.slice(0, 10).map(x =>
+    '<div class="kv"><span>' + esc(x.name) + '</span><span>' + x.units + ' шт.</span></div>').join('') + '</div>';
+  return h;
+}
+document.addEventListener('click', e => { const b = e.target.closest('[data-days]'); if (b) loadReport(Number(b.dataset.days)); });
+
+/* ---------- карточка товара ---------- */
+function openItem(it) {
+  cur = it; renderItem();
+  $('page').classList.remove('hidden'); $('page').scrollTop = 0;
+  document.body.style.overflow = 'hidden';
+  if (tg) tg.BackButton.show();
+}
+function closePage() {
+  cur = null; $('page').classList.add('hidden'); document.body.style.overflow = '';
+  if (tg) tg.BackButton.hide();
+}
+function renderItem() {
+  const it = cur, sh = D.sheets[it.s], c = conf(it);
+  let h = (tg && tg.initData ? '' : '<button class="back" data-close>← Назад</button>') +
+    '<div class="card"><div class="title">' + esc(it.n) + '</div>' + (c ? '<div class="conf">' + esc(c) + '</div>' : '') + '</div>' +
+    '<div class="card"><div class="kv"><span>В наличии</span><span class="big" style="color:var(--' + (it.q <= 0 ? 'hint' : it.q <= D.lowQty ? 'warn' : 'ok') + ')">' + it.q + ' шт.</span></div>' +
+    '<div class="kv"><span>Продано за 30 дней</span><span>' + it.s30 + ' шт.</span></div>' +
+    '<div class="kv"><span>Лист · ID</span><span>' + esc(sh.name.trim()) + ' · ' + it.id + '</span></div></div>';
+  if (canEdit()) {
+    h += '<div class="ops">' + ['sale', 'in', 'ret', 'wo'].map(k => '<button class="op" data-op="' + k + '">' + OPS[k].icon + ' ' + OPS[k].name + '</button>').join('') +
+      '<button class="op wide" data-op="cnt">' + OPS.cnt.icon + ' ' + OPS.cnt.name + ' (точное количество)</button></div>';
+  }
+  const editable = canEdit() ? sh.cols.map(x => x.col) : [];
+  let rows = '';
+  sh.headers.forEach((hd, i) => {
+    if (i < 3 || i === sh.conf) return;
+    const L = colLetter(i + 1), v = it.v[i];
+    const has = v !== '' && v != null;
+    const ed = editable.indexOf(L) >= 0;
+    if (!has && !ed) return;
+    rows += '<button class="field' + (ed ? ' edit' : '') + '"' + (ed ? ' data-edit="' + L + '"' : '') + '><span class="h">' + esc(hd || 'Колонка ' + L) +
+      '</span><span class="v">' + (has ? esc(v) : '<span style="color:var(--hint)">—</span>') + '</span></button>';
+  });
+  if (rows) h += '<h3>Все данные' + (canEdit() ? ' · нажмите, чтобы изменить' : '') + '</h3><div class="card">' + rows + '</div>';
+  $('page').innerHTML = h;
+}
+function colLetter(n) { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+$('page').addEventListener('click', e => {
+  if (e.target.closest('[data-close]')) { closePage(); return; }
+  const o = e.target.closest('[data-op]'); if (o) { openOp(o.dataset.op); return; }
+  const f = e.target.closest('[data-edit]'); if (f) openEdit(f.dataset.edit);
+});
+
+/* ---------- нижнее окно ---------- */
+function openSheet(html) {
+  $('sheet').innerHTML = html; $('shade').classList.remove('hidden');
+  if (tg) tg.BackButton.show();
+}
+function closeSheet() { $('shade').classList.add('hidden'); if (tg && !cur) tg.BackButton.hide(); }
+$('shade').addEventListener('click', e => { if (e.target.id === 'shade' || e.target.closest('[data-cancel]')) closeSheet(); });
+function goBack() {
+  if (!$('shade').classList.contains('hidden')) closeSheet();
+  else if (cur) closePage();
+}
+async function busy(btn, fn) {
+  const t = btn.textContent; btn.disabled = true; btn.textContent = 'Записываю…';
+  try { await fn(); } catch (e) { haptic('error'); toast('⚠️ ' + e.message, 5000); btn.disabled = false; btn.textContent = t;
+    if (/изменилась|не найден/i.test(e.message)) refresh(true); }
+}
+
+/* операции: продажа / приход / возврат / списание / пересчёт */
+function openOp(code) {
+  const op = OPS[code], it = cur;
+  openSheet('<h2>' + op.icon + ' ' + op.name + '</h2><div class="sub">' + esc(oneLine(it.n)) + '</div>' +
+    '<div class="lbl">' + (code === 'cnt' ? 'Сколько штук на самом деле?' : 'Сколько штук?') + '</div>' +
+    '<div class="stepper"><button data-step="-1">−</button><input id="opq" type="number" inputmode="numeric" min="0" value="' + (code === 'cnt' ? Math.max(0, it.q) : 1) + '"><button data-step="1">+</button></div>' +
+    '<div class="lbl">' + op.extra + '</div><input id="opx" class="inp" maxlength="200" autocomplete="off">' +
+    '<div class="preview" id="opp"></div>' +
+    '<div class="btns"><button class="btn sec" data-cancel>Отмена</button><button class="btn" id="opok">✅ Подтвердить</button></div>');
+  const upd = () => {
+    const q = Math.floor(Number($('opq').value));
+    const ok = q >= 0 && (code === 'cnt' || q > 0);
+    const after = op.sign === 0 ? q : it.q + op.sign * q;
+    $('opp').innerHTML = ok ? 'Остаток: <b>' + it.q + '</b> → <b style="color:var(--' + (after < 0 ? 'bad' : 'text') + ')">' + after + '</b> шт.' +
+      (after < 0 ? '<br><span style="color:var(--bad)">На складе только ' + it.q + ' шт.</span>' : '') : '';
+    $('opok').disabled = !ok || after < 0;
+  };
+  $('opq').addEventListener('input', upd);
+  $('sheet').querySelectorAll('[data-step]').forEach(b => b.addEventListener('click', () => {
+    $('opq').value = Math.max(0, (Math.floor(Number($('opq').value)) || 0) + Number(b.dataset.step)); upd();
+  }));
+  upd();
+  $('opok').addEventListener('click', () => busy($('opok'), async () => {
+    const q = Math.floor(Number($('opq').value));
+    const j = await api('op', { sheet: D.sheets[it.s].name, row: it.r, id: it.id, name: it.n, code: code, q: q, extra: $('opx').value });
+    if (code === 'sale') { it.s30 += q; it.s60 += q; }
+    it.q = j.qty;
+    closeSheet(); renderItem(); renderMain(); saveCache();
+    haptic('success'); toast(j.message);
+  }));
+}
+
+/* правка одной колонки */
+function openEdit(L) {
+  const it = cur, sh = D.sheets[it.s], i = colNum(L) - 1, v = it.v[i];
+  openSheet('<h2>✏️ ' + esc(sh.headers[i] || 'Колонка ' + L) + '</h2><div class="sub">' + esc(oneLine(it.n)) + '</div>' +
+    '<textarea id="edv" class="inp">' + esc(v == null ? '' : v) + '</textarea>' +
+    '<div class="btns"><button class="btn sec" data-cancel>Отмена</button><button class="btn" id="edok">💾 Сохранить</button></div>');
+  $('edok').addEventListener('click', () => busy($('edok'), async () => {
+    const f = {}; f[L] = $('edv').value.trim();
+    const j = await api('update', { sheet: sh.name, row: it.r, id: it.id, name: it.n, fields: f });
+    closeSheet(); haptic('success'); toast(j.message);
+    await refresh(true);
+  }));
+}
+
+/* ---------- новый товар ---------- */
+function newHtml() {
+  let h = '<div class="note">Сначала проверьте поиском, что товара точно нет в таблице.</div><h3>Лист</h3><div class="chips">' +
+    D.sheets.map((sh, i) => '<button class="chip' + (newSheet === i ? ' on' : '') + '" data-newsheet="' + i + '">' + esc(sh.name.trim()) + '</button>').join('') + '</div>';
+  if (newSheet < 0) return h + '<div class="empty">Выберите лист, куда добавить товар</div>';
+  const sh = D.sheets[newSheet];
+  const last = D.items.filter(it => it.s === newSheet).slice(-5);
+  h += '<div class="card">' + sh.cols.map(c => {
+    const i = colNum(c.col) - 1;
+    const ex = []; last.forEach(it => { const v = it.v[i]; if (v !== '' && v != null && ex.indexOf(String(v)) < 0) ex.push(String(v)); });
+    return '<div class="lbl">' + esc(c.header) + '</div><input class="inp" data-col="' + c.col + '" placeholder="' + esc(ex.slice(0, 2).map(oneLine).join(' / ')) + '" autocomplete="off">';
+  }).join('') +
+    '<div class="lbl">Сколько штук пришло</div><input class="inp" id="nq" type="number" inputmode="numeric" min="0" value="1">' +
+    '<div class="lbl">Поставщик (необязательно)</div><input class="inp" id="nx" autocomplete="off">' +
+    '<div class="btns"><button class="btn" id="nok">➕ Добавить</button></div></div>';
+  return h;
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-newsheet]'); if (b) { newSheet = Number(b.dataset.newsheet); renderMain(); return; }
+  if (e.target.id === 'nok') confirmNew();
+});
+function confirmNew() {
+  const sh = D.sheets[newSheet], fields = {};
+  document.querySelectorAll('[data-col]').forEach(i => { if (i.value.trim()) fields[i.dataset.col] = i.value.trim(); });
+  const q = Math.floor(Number($('nq').value));
+  if (!Object.keys(fields).length) { toast('Заполните хотя бы одну колонку.'); return; }
+  if (!(q >= 0)) { toast('Количество должно быть числом 0 или больше.'); return; }
+  const x = $('nx').value.trim();
+  const hdr = L => (sh.cols.find(c => c.col === L) || {}).header || L;
+  openSheet('<h2>➕ Новый товар</h2><div class="sub">Лист ' + esc(sh.name.trim()) + '</div><div class="card" style="padding:4px 12px;background:var(--sec)">' +
+    Object.keys(fields).map(L => '<div class="kv"><span>' + esc(hdr(L)) + '</span><span>' + esc(fields[L]) + '</span></div>').join('') +
+    '<div class="kv"><span>Количество</span><span>' + q + ' шт.</span></div>' + (x ? '<div class="kv"><span>Поставщик</span><span>' + esc(x) + '</span></div>' : '') +
+    '</div><div class="btns"><button class="btn sec" data-cancel>Отмена</button><button class="btn" id="nok2">✅ Подтвердить</button></div>');
+  $('nok2').addEventListener('click', () => busy($('nok2'), async () => {
+    const j = await api('new', { sheet: sh.name, fields: fields, q: q, extra: x });
+    closeSheet(); haptic('success'); toast(j.message, 6000);
+    await refresh(true);
+    view = 'stock'; cat = newSheet; renderTabs(); renderMain();
+  }));
+}
+
+/* ---------- демо (просмотр без Telegram) ---------- */
+function demoApi(action, p) {
+  return new Promise((ok, fail) => setTimeout(() => {
+    if (action === 'init') return ok(JSON.parse(JSON.stringify(window.DEMO_DATA)));
+    if (action === 'report') return ok({ days: p.days, sale: { total_units: 0, total_operations: 0, by_sheet: {}, top_items: [], top_counterparties: [] },
+      arrival: { total_units: 0, total_operations: 0, by_sheet: {}, top_items: [], top_counterparties: [] } });
+    if (action === 'op') {
+      const it = D.items.find(x => x.r === p.row && D.sheets[x.s].name === p.sheet);
+      const op = OPS[p.code]; const after = op.sign === 0 ? p.q : it.q + op.sign * p.q;
+      return ok({ message: '✅ Выполнено (демо, в таблицу НЕ записано). Остаток: ' + after + ' шт.', qty: after });
+    }
+    ok({ message: '✅ Демо: в таблицу ничего не записано.' });
+  }, 400));
+}
+
+/* ---------- старт ---------- */
+(function start() {
+  if (tg) {
+    tg.ready(); tg.expand();
+    tg.BackButton.onClick(goBack);
+    try { tg.disableVerticalSwipes && tg.disableVerticalSwipes(); } catch (e) {}
+  }
+  if (!tg || !tg.initData) {
+    if (window.DEMO_DATA) { DEMO = true; setData(JSON.parse(JSON.stringify(window.DEMO_DATA))); return; }
+    fatal('Откройте склад через Telegram-бота ' + BOT + ' — кнопка «📦 Склад» рядом с полем ввода.');
+    return;
+  }
+  const c = loadCache();
+  if (c && c.items) setData(c);
+  refresh(true);
+})();
+</script>
+</body>
+</html>
