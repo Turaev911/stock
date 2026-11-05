@@ -108,6 +108,17 @@
   .stat .card { flex: 1; text-align: center; margin: 0; }
   .stat .card div:last-child { color: var(--hint); font-size: 13px; }
   .note { color: var(--hint); font-size: 13px; padding: 4px 4px 8px; }
+
+  /* Полноэкранный режим Telegram: не залезать под кнопки Telegram сверху */
+  header { padding-top: calc(10px + var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px)); }
+  #page { padding-top: calc(12px + var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px)); }
+  /* Широкий экран (компьютер): содержимое по центру, не растягивать строки */
+  @media (min-width: 760px) {
+    main, header .searchrow, header .tabs { max-width: 980px; margin-left: auto; margin-right: auto; }
+    #page { padding-left: max(12px, calc(50% - 490px)); padding-right: max(12px, calc(50% - 490px)); }
+    #sheet { max-width: 560px; margin: 0 auto; border-radius: 16px 16px 0 0; }
+    #shade { justify-content: center; }
+  }
 </style>
 </head>
 <body>
@@ -116,6 +127,7 @@
     <div class="searchrow">
       <div class="search">🔎<input id="q" type="search" placeholder="Модель, P/N, объём…" autocomplete="off" enterkeyhint="search"></div>
       <button class="iconbtn" id="refresh" title="Обновить">⟳</button>
+      <button class="iconbtn hidden" id="fs" title="Во весь экран / окном">⛶</button>
     </div>
     <nav class="tabs" id="tabs"></nav>
   </header>
@@ -529,6 +541,13 @@ function demoApi(action, p) {
     tg.ready(); tg.expand();
     tg.BackButton.onClick(goBack);
     try { tg.disableVerticalSwipes && tg.disableVerticalSwipes(); } catch (e) {}
+    // На компьютере сразу открываемся во весь экран; кнопка ⛶ переключает обратно в окно
+    const desktop = ['tdesktop', 'macos', 'web', 'weba', 'webk'].indexOf(tg.platform) >= 0;
+    if (desktop && tg.isVersionAtLeast && tg.isVersionAtLeast('8.0')) {
+      $('fs').classList.remove('hidden');
+      $('fs').addEventListener('click', () => { try { tg.isFullscreen ? tg.exitFullscreen() : tg.requestFullscreen(); } catch (e) {} });
+      try { tg.requestFullscreen(); } catch (e) {}
+    }
   }
   if (!tg || !tg.initData) {
     if (window.DEMO_DATA) { DEMO = true; setData(JSON.parse(JSON.stringify(window.DEMO_DATA))); return; }
