@@ -146,6 +146,7 @@
 <div id="page" class="hidden"></div>
 <div id="shade" class="hidden"><div id="sheet"></div></div>
 <div id="toast" class="hidden"></div>
+<input type="file" id="aiFile" accept="image/*" hidden>
 
 <script>
 'use strict';
@@ -211,13 +212,16 @@ async function api(action, payload) {
 }
 
 function setData(d) {
+  const had = !!D;
   D = d;
   D.items.forEach(it => {
     it.hay = norm(D.sheets[it.s].name + ' ' + it.v.join(' '));
     it.hayC = it.hay.replace(/[\s\-\/.]/g, '');
   });
   $('hdr').classList.remove('hidden');
-  renderTabs(); renderMain();
+  // На вкладке «Новый» не перерисовываем форму, когда склад обновился в фоне: иначе пропадает набранный текст
+  // и теряется выбранное фото (поле выбора файла исчезает из страницы, пока открыта камера).
+  renderTabs(); if (view !== 'new' || !had) renderMain();
   if (cur) { const f = D.items.find(x => x.s === cur.s && x.id === cur.id); cur = f || null; if (cur) renderItem(); else closePage(); }
 }
 function saveCache() {
@@ -518,7 +522,7 @@ function openEdit(L) {
 function newHtml() {
   let h = '<div class="card aibox"><div style="font-weight:600">📷 Распознать по фото или P/N</div>' +
     '<div class="note" style="padding:4px 0 8px">Сфотографируйте наклейку или напишите P/N / модель — колонки заполнятся сами, останется проверить.</div>' +
-    '<label class="btn">📷 Фото наклейки<input type="file" id="aiFile" accept="image/*" hidden></label>' +
+    '<button class="btn" id="aiPick" style="width:100%">📷 Фото наклейки</button>' +
     '<div class="row2"><input class="inp" id="aiText" placeholder="P/N или модель, например P00924-B21" autocomplete="off" enterkeyhint="go">' +
     '<button class="btn go" id="aiGo" title="Распознать">🔎</button></div><div id="aiOut"></div></div>' +
     '<div class="note">Или заполните вручную. Сначала проверьте поиском, что товара точно нет в таблице.</div><h3>Лист</h3><div class="chips">' +
@@ -550,6 +554,7 @@ function newHtml() {
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-newsheet]'); if (b) { newSheet = Number(b.dataset.newsheet); renderMain(); return; }
   if (e.target.id === 'nok') confirmNew();
+  if (e.target.closest('#aiPick')) { const f = $('aiFile'); if (f) f.click(); return; }
   if (e.target.closest('#aiGo')) { const t = $('aiText').value.trim(); if (t) aiRun(t, null); else toast('Напишите P/N или модель.'); return; }
   if (e.target.id === 'aiNew') { if (window.__aiRes) aiApply(window.__aiRes); return; }
   const q = e.target.closest('[data-aiq]');
