@@ -67,6 +67,9 @@
   .back { color: var(--link); padding: 4px 0 10px; }
   .card { background: var(--card); border-radius: 12px; padding: 14px; margin-bottom: 10px; }
   .card .title { font-size: 17px; font-weight: 600; white-space: pre-line; word-break: break-word; }
+  .card .title, .conf { -webkit-user-select: text; user-select: text; }
+  .copyrow { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+  .copybtn { padding: 8px 12px; border-radius: 10px; background: var(--sec); font-size: 14px; }
   .conf { white-space: pre-line; margin-top: 8px; font-size: 14px; }
   .kv { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--sep); }
   .kv:last-child { border-bottom: 0; }
@@ -395,7 +398,9 @@ function closePage() {
 function renderItem() {
   const it = cur, sh = D.sheets[it.s], c = conf(it);
   let h = (tg && tg.initData ? '' : '<button class="back" data-close>← Назад</button>') +
-    '<div class="card"><div class="title">' + esc(it.n) + '</div>' + (c ? '<div class="conf">' + esc(c) + '</div>' : '') + '</div>' +
+    '<div class="card"><div class="title">' + esc(it.n) + '</div>' + (c ? '<div class="conf">' + esc(c) + '</div>' : '') +
+    '<div class="copyrow"><button class="copybtn" data-copy="name">📋 Скопировать название</button>' +
+    (c ? '<button class="copybtn" data-copy="full">📋 Название + конфигурация</button>' : '') + '</div></div>' +
     '<div class="card"><div class="kv"><span>В наличии</span><span class="big" style="color:var(--' + (it.q <= 0 ? 'hint' : it.q <= D.lowQty ? 'warn' : 'ok') + ')">' + it.q + ' шт.</span></div>' +
     '<div class="kv"><span>Продано за 30 дней</span><span>' + it.s30 + ' шт.</span></div>' +
     '<div class="kv"><span>Лист · ID</span><span>' + esc(sh.name.trim()) + ' · ' + it.id + '</span></div></div>';
@@ -418,8 +423,30 @@ function renderItem() {
   $('page').innerHTML = h;
 }
 function colLetter(n) { let s = ''; while (n > 0) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+/* копирование названия (кнопка → буфер обмена; если телефон не даёт — окно с текстом, который можно выделить) */
+async function copyText(text) {
+  try { await navigator.clipboard.writeText(text); return true; } catch (e) {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.setAttribute('readonly', ''); ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.appendChild(ta); ta.focus(); ta.select(); ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand('copy'); ta.remove();
+    return ok;
+  } catch (e) { return false; }
+}
+async function copyItem(kind) {
+  if (!cur) return;
+  const c = conf(cur);
+  const text = kind === 'full' && c ? cur.n + '\n' + c : cur.n;
+  if (await copyText(text)) { haptic('success'); toast('📋 Скопировано', 1800); return; }
+  openSheet('<h2>📋 Скопировать</h2><div class="sub">Нажмите на текст и удерживайте, затем выберите «Копировать».</div>' +
+    '<textarea id="cpv" class="inp" readonly style="min-height:120px">' + esc(text) + '</textarea>' +
+    '<div class="btns"><button class="btn sec" data-cancel>Закрыть</button></div>');
+  const t = $('cpv'); if (t) { t.focus(); t.select(); }
+}
 $('page').addEventListener('click', e => {
   if (e.target.closest('[data-close]')) { closePage(); return; }
+  const cp = e.target.closest('[data-copy]'); if (cp) { copyItem(cp.dataset.copy); return; }
   const o = e.target.closest('[data-op]'); if (o) { openOp(o.dataset.op); return; }
   const f = e.target.closest('[data-edit]'); if (f) openEdit(f.dataset.edit);
 });
