@@ -108,6 +108,13 @@
   .stat .card { flex: 1; text-align: center; margin: 0; }
   .stat .card div:last-child { color: var(--hint); font-size: 13px; }
   .note { color: var(--hint); font-size: 13px; padding: 4px 4px 8px; }
+  .card .chip { background: var(--sec); }
+  .card .chip.on { background: var(--btn); color: var(--btn-text); }
+  .aibox .row2 { display: flex; gap: 8px; margin-top: 8px; }
+  .aibox .row2 .inp { flex: 1; min-width: 0; }
+  .aibox .go { flex: none; width: 52px; }
+  label.btn { display: flex; align-items: center; justify-content: center; }
+  .ai-filled { box-shadow: inset 3px 0 0 var(--btn); }
 
   /* Полноэкранный режим Telegram: не залезать под кнопки Telegram сверху */
   header { padding-top: calc(10px + var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px)); }
@@ -160,6 +167,7 @@ let DEMO = false;
 let view = 'stock', cat = -1, showZero = false, query = '';
 let cur = null;            // открытая карточка
 let newSheet = -1;         // лист для нового товара
+let draft = null;          // распознанный товар {si, title, fields, qs}
 let report = null, reportDays = 30;
 
 /* ---------- утилиты ---------- */
@@ -481,15 +489,31 @@ function openEdit(L) {
 
 /* ---------- новый товар ---------- */
 function newHtml() {
-  let h = '<div class="note">Сначала проверьте поиском, что товара точно нет в таблице.</div><h3>Лист</h3><div class="chips">' +
+  let h = '<div class="card aibox"><div style="font-weight:600">📷 Распознать по фото или P/N</div>' +
+    '<div class="note" style="padding:4px 0 8px">Сфотографируйте наклейку или напишите P/N / модель — колонки заполнятся сами, останется проверить.</div>' +
+    '<label class="btn">📷 Фото наклейки<input type="file" id="aiFile" accept="image/*" hidden></label>' +
+    '<div class="row2"><input class="inp" id="aiText" placeholder="P/N или модель, например P00924-B21" autocomplete="off" enterkeyhint="go">' +
+    '<button class="btn go" id="aiGo" title="Распознать">🔎</button></div><div id="aiOut"></div></div>' +
+    '<div class="note">Или заполните вручную. Сначала проверьте поиском, что товара точно нет в таблице.</div><h3>Лист</h3><div class="chips">' +
     D.sheets.map((sh, i) => '<button class="chip' + (newSheet === i ? ' on' : '') + '" data-newsheet="' + i + '">' + esc(sh.name.trim()) + '</button>').join('') + '</div>';
   if (newSheet < 0) return h + '<div class="empty">Выберите лист, куда добавить товар</div>';
   const sh = D.sheets[newSheet];
+  const dr = draft && draft.si === newSheet ? draft : null;
+  if (dr) {
+    h += '<div class="card"><div style="font-weight:600">🤖 ' + esc(dr.title || 'Распознанный товар') + '</div>' +
+      '<div class="note" style="padding:4px 0 0">Проверьте поля ниже — распознанные отмечены полоской слева. ИИ может ошибаться.</div>' +
+      dr.qs.map(q => '<div class="lbl">❓ ' + esc(q.q) + '</div>' + (q.options.length ? '<div class="chips">' +
+        q.options.map(o => '<button class="chip" data-aiq="' + q.col + '" data-v="' + esc(o) + '">' + esc(o) + '</button>').join('') + '</div>' : '')).join('') +
+      (dr.qs.length ? '<div class="note" style="padding:6px 0 0">Ответ можно выбрать кнопкой или вписать в поле ниже.</div>' : '') + '</div>';
+  }
   const last = D.items.filter(it => it.s === newSheet).slice(-5);
   h += '<div class="card">' + sh.cols.map(c => {
     const i = colNum(c.col) - 1;
     const ex = []; last.forEach(it => { const v = it.v[i]; if (v !== '' && v != null && ex.indexOf(String(v)) < 0) ex.push(String(v)); });
-    return '<div class="lbl">' + esc(c.header) + '</div><input class="inp" data-col="' + c.col + '" placeholder="' + esc(ex.slice(0, 2).map(oneLine).join(' / ')) + '" autocomplete="off">';
+    const val = dr && dr.fields[c.col] ? dr.fields[c.col] : '';
+    const ask = dr && dr.qs.some(q => q.col === c.col);
+    return '<div class="lbl">' + esc(c.header) + (ask ? ' ❓' : '') + '</div><input class="inp' + (val ? ' ai-filled' : '') + '" data-col="' + c.col + '" value="' + esc(val) +
+      '" placeholder="' + esc(ex.slice(0, 2).map(oneLine).join(' / ')) + '" autocomplete="off">';
   }).join('') +
     '<div class="lbl">Сколько штук пришло</div><input class="inp" id="nq" type="number" inputmode="numeric" min="0" value="1">' +
     '<div class="lbl">Поставщик (необязательно)</div><input class="inp" id="nx" autocomplete="off">' +
@@ -499,7 +523,76 @@ function newHtml() {
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-newsheet]'); if (b) { newSheet = Number(b.dataset.newsheet); renderMain(); return; }
   if (e.target.id === 'nok') confirmNew();
+  if (e.target.closest('#aiGo')) { const t = $('aiText').value.trim(); if (t) aiRun(t, null); else toast('Напишите P/N или модель.'); return; }
+  if (e.target.id === 'aiNew') { if (window.__aiRes) aiApply(window.__aiRes); return; }
+  const q = e.target.closest('[data-aiq]');
+  if (q) {
+    const inp = document.querySelector('[data-col="' + q.dataset.aiq + '"]');
+    if (inp) { inp.value = q.dataset.v; inp.classList.add('ai-filled'); }
+    q.parentNode.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c === q));
+  }
 });
+document.addEventListener('keydown', e => { if (e.target.id === 'aiText' && e.key === 'Enter') { e.preventDefault(); const t = e.target.value.trim(); if (t) aiRun(t, null); } });
+document.addEventListener('change', e => { if (e.target.id === 'aiFile' && e.target.files && e.target.files[0]) aiRun($('aiText').value.trim(), e.target.files[0]); });
+
+/* ---------- распознавание по фото / P/N ---------- */
+function readImage(file) {
+  // Уменьшаем фото до 1600 px и сжимаем в JPEG — быстрее отправка, Gemini этого хватает
+  return new Promise((ok, fail) => {
+    const url = URL.createObjectURL(file), img = new Image();
+    img.onload = () => {
+      const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+      const w = Math.round(img.naturalWidth * k), h = Math.round(img.naturalHeight * k);
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      ok(cv.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); fail(new Error('Не удалось открыть фото. Попробуйте другое.')); };
+    img.src = url;
+  });
+}
+let aiBusy = false;
+async function aiRun(text, file) {
+  if (aiBusy) return;
+  aiBusy = true;
+  const out = $('aiOut');
+  const msg = (h) => { const o = $('aiOut'); if (o) o.innerHTML = h; };
+  msg('<div class="note" style="padding:10px 0 0">🤖 Распознаю и ищу в интернете… обычно 10–30 секунд</div>');
+  try {
+    const p = { text: text || '' };
+    if (file) p.image = await readImage(file);
+    const r = await api('ai', p);
+    window.__aiRes = r;
+    if (!r.found) {
+      msg('<div class="note" style="padding:10px 0 0">🤷 Не удалось определить товар.' + (r.note ? '<br>' + esc(r.note) : '') +
+        '<br>Попробуйте фото наклейки с P/N крупнее или напишите P/N текстом.</div>');
+      return;
+    }
+    const dups = (r.dups || []).map(d => D.items.find(x => x.s === d.si && x.id === d.id)).filter(Boolean);
+    if (dups.length) {
+      msg('<h3>🔎 ' + esc(r.title || 'Распознано') + '</h3><div class="note">Похоже, такой товар уже есть на складе. Если это он — откройте карточку и нажмите «📥 Приход».</div>' +
+        listHtml(dups) + '<div class="btns"><button class="btn sec" id="aiNew">➕ Нет, это новый товар</button></div>');
+      return;
+    }
+    aiApply(r);
+  } catch (e) {
+    msg('<div class="note" style="padding:10px 0 0;color:var(--bad)">⚠️ ' + esc(e.message) + '</div>');
+  } finally {
+    aiBusy = false;
+    const f = $('aiFile'); if (f) f.value = '';
+  }
+}
+function aiApply(r) {
+  let si = r.si;
+  if (!D.sheets[si] || D.sheets[si].name !== r.sheet) si = D.sheets.findIndex(s => s.name === r.sheet);
+  if (si < 0) { toast('Лист «' + r.sheet + '» не найден. Обновите склад кнопкой ⟳.'); return; }
+  draft = { si: si, title: r.title, fields: r.fields || {}, qs: r.qs || [] };
+  newSheet = si; view = 'new';
+  renderTabs(); renderMain();
+  haptic('success');
+  const f = document.querySelector('.ai-filled'); if (f) f.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
 function confirmNew() {
   const sh = D.sheets[newSheet], fields = {};
   document.querySelectorAll('[data-col]').forEach(i => { if (i.value.trim()) fields[i.dataset.col] = i.value.trim(); });
@@ -514,6 +607,7 @@ function confirmNew() {
     '</div><div class="btns"><button class="btn sec" data-cancel>Отмена</button><button class="btn" id="nok2">✅ Подтвердить</button></div>');
   $('nok2').addEventListener('click', () => busy($('nok2'), async () => {
     const j = await api('new', { sheet: sh.name, fields: fields, q: q, extra: x });
+    draft = null; window.__aiRes = null;
     closeSheet(); haptic('success'); toast(j.message, 6000);
     await refresh(true);
     view = 'stock'; cat = newSheet; renderTabs(); renderMain();
@@ -524,6 +618,11 @@ function confirmNew() {
 function demoApi(action, p) {
   return new Promise((ok, fail) => setTimeout(() => {
     if (action === 'init') return ok(JSON.parse(JSON.stringify(window.DEMO_DATA)));
+    if (action === 'ai') {
+      const it = D.items[0];
+      return ok({ found: true, si: it.s, sheet: D.sheets[it.s].name, title: 'Демо: ' + oneLine(it.n), dups: [],
+        fields: { D: it.v[3] || '', E: it.v[4] || '' }, qs: [{ col: 'Z', q: 'Состояние товара?', options: ['New', 'B/U'] }] });
+    }
     if (action === 'report') return ok({ days: p.days, sale: { total_units: 0, total_operations: 0, by_sheet: {}, top_items: [], top_counterparties: [] },
       arrival: { total_units: 0, total_operations: 0, by_sheet: {}, top_items: [], top_counterparties: [] } });
     if (action === 'op') {
