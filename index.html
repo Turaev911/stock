@@ -125,9 +125,9 @@
 <div id="app">
   <header id="hdr" class="hidden">
     <div class="searchrow">
+      <button class="iconbtn hidden" id="fs" title="Во весь экран (Esc — обратно в окно)">⛶</button>
       <div class="search">🔎<input id="q" type="search" placeholder="Модель, P/N, объём…" autocomplete="off" enterkeyhint="search"></div>
       <button class="iconbtn" id="refresh" title="Обновить">⟳</button>
-      <button class="iconbtn hidden" id="fs" title="Во весь экран / окном">⛶</button>
     </div>
     <nav class="tabs" id="tabs"></nav>
   </header>
@@ -541,12 +541,17 @@ function demoApi(action, p) {
     tg.ready(); tg.expand();
     tg.BackButton.onClick(goBack);
     try { tg.disableVerticalSwipes && tg.disableVerticalSwipes(); } catch (e) {}
-    // На компьютере сразу открываемся во весь экран; кнопка ⛶ переключает обратно в окно
+    // На компьютере открываемся обычным окном (его можно растягивать за края).
+    // Кнопка ⛶ — во весь экран и обратно; Esc — выйти из полного экрана.
     const desktop = ['tdesktop', 'macos', 'web', 'weba', 'webk'].indexOf(tg.platform) >= 0;
     if (desktop && tg.isVersionAtLeast && tg.isVersionAtLeast('8.0')) {
-      $('fs').classList.remove('hidden');
-      $('fs').addEventListener('click', () => { try { tg.isFullscreen ? tg.exitFullscreen() : tg.requestFullscreen(); } catch (e) {} });
-      try { tg.requestFullscreen(); } catch (e) {}
+      const fs = $('fs');
+      const sync = () => { fs.textContent = tg.isFullscreen ? '🗗' : '⛶'; fs.title = tg.isFullscreen ? 'Обычное окно (Esc)' : 'Во весь экран'; };
+      fs.classList.remove('hidden');
+      fs.addEventListener('click', () => { try { tg.isFullscreen ? tg.exitFullscreen() : tg.requestFullscreen(); } catch (e) {} });
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && tg.isFullscreen) { try { tg.exitFullscreen(); } catch (x) {} } });
+      try { tg.onEvent('fullscreenChanged', sync); } catch (e) {}
+      sync();
     }
   }
   if (!tg || !tg.initData) {
