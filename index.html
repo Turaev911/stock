@@ -198,13 +198,19 @@ function conf(it) { const ci = D.sheets[it.s].conf; return ci >= 0 && it.v[ci] !
 function qtyClass(q) { return q <= 0 ? 'zero' : (q <= D.lowQty ? 'low' : ''); }
 
 /* ---------- связь с таблицей ---------- */
-async function api(action, payload) {
+async function api(action, payload, timeoutMs) {
   if (DEMO) return demoApi(action, payload || {});
   const body = JSON.stringify(Object.assign({ action: action, initData: tg.initData }, payload || {}));
+  const ctl = timeoutMs && window.AbortController ? new AbortController() : null;
+  const timer = ctl ? setTimeout(() => ctl.abort(), timeoutMs) : 0;
   let res;
   try {
-    res = await fetch(API_URL + '?api=1', { method: 'POST', body: body });
-  } catch (e) { throw new Error('Нет связи с таблицей. Проверьте интернет.'); }
+    res = await fetch(API_URL + '?api=1', { method: 'POST', body: body, signal: ctl ? ctl.signal : undefined });
+  } catch (e) {
+    clearTimeout(timer);
+    throw new Error(ctl && ctl.signal.aborted ? 'Сервер не ответил за ' + Math.round(timeoutMs / 1000) + ' секунд. Попробуйте ещё раз или напишите P/N текстом.' : 'Нет связи с таблицей. Проверьте интернет.');
+  }
+  clearTimeout(timer);
   let j;
   try { j = await res.json(); } catch (e) { throw new Error('Таблица ответила с ошибкой. Попробуйте ещё раз.'); }
   if (!j.ok) { const err = new Error(j.error || 'Ошибка'); err.code = j.code; throw err; }
@@ -554,6 +560,7 @@ function newHtml() {
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-newsheet]'); if (b) { newSheet = Number(b.dataset.newsheet); renderMain(); return; }
   if (e.target.id === 'nok') confirmNew();
+  if (e.target.closest('[data-airetry]')) { closeSheet(); if (window.__aiRetry) window.__aiRetry(); return; }
   if (e.target.closest('#aiPick')) { const f = $('aiFile'); if (f) f.click(); return; }
   if (e.target.closest('#aiGo')) { const t = $('aiText').value.trim(); if (t) aiRun(t, null); else toast('Напишите P/N или модель.'); return; }
   if (e.target.id === 'aiNew') { if (window.__aiRes) aiApply(window.__aiRes); return; }
@@ -569,16 +576,16 @@ document.addEventListener('change', e => { if (e.target.id === 'aiFile' && e.tar
 
 /* ---------- распознавание по фото / P/N ---------- */
 function readImage(file) {
-  // Уменьшаем фото до 1600 px и сжимаем в JPEG — быстрее отправка, Gemini этого хватает
+  // Уменьшаем фото до 1280 px и сжимаем в JPEG — быстрее отправка и разбор, для чтения наклейки этого хватает
   return new Promise((ok, fail) => {
     const url = URL.createObjectURL(file), img = new Image();
     img.onload = () => {
-      const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
+      const k = Math.min(1, 1280 / Math.max(img.naturalWidth, img.naturalHeight));
       const w = Math.round(img.naturalWidth * k), h = Math.round(img.naturalHeight * k);
       const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
       cv.getContext('2d').drawImage(img, 0, 0, w, h);
       URL.revokeObjectURL(url);
-      ok(cv.toDataURL('image/jpeg', 0.85));
+      ok(cv.toDataURL('image/jpeg', 0.8));
     };
     img.onerror = () => { URL.revokeObjectURL(url); fail(new Error('Не удалось открыть фото. Попробуйте другое.')); };
     img.src = url;
@@ -588,13 +595,25 @@ let aiBusy = false;
 async function aiRun(text, file) {
   if (aiBusy) return;
   aiBusy = true;
-  const out = $('aiOut');
   const msg = (h) => { const o = $('aiOut'); if (o) o.innerHTML = h; };
-  msg('<div class="note" style="padding:10px 0 0">🤖 Распознаю и ищу в интернете… обычно 10–30 секунд</div>');
+  const t0 = Date.now();
+  let stage = file ? 'Фото выбрано (' + Math.round(file.size / 1024) + ' КБ)' : 'Отправляю запрос';
+  const cancelled = () => $('shade').classList.contains('hidden');   // закрыли окно — результат не нужен
+  msg('');
+  openSheet('<h2>🤖 Распознаю…</h2><div class="sub" id="aiStat"></div>' +
+    '<div class="note" style="padding:0 0 8px">Обычно 10–30 секунд. Не закрывайте приложение, пока идёт распознавание.</div>' +
+    '<div class="btns"><button class="btn sec" data-cancel>Отмена</button></div>');
+  const upd = () => { const el = $('aiStat'); if (el) el.textContent = stage + ' · ' + Math.round((Date.now() - t0) / 1000) + ' с'; };
+  upd();
+  const tick = setInterval(upd, 500);
   try {
     const p = { text: text || '' };
-    if (file) p.image = await readImage(file);
-    const r = await api('ai', p);
+    if (file) { stage = 'Сжимаю фото'; p.image = await readImage(file); stage = 'Отправляю фото (' + Math.round(p.image.length / 1024) + ' КБ)'; }
+    stage = 'Gemini читает и ищет в интернете';
+    const r = await api('ai', p, 90000);
+    clearInterval(tick);
+    if (cancelled()) return;
+    closeSheet();
     window.__aiRes = r;
     if (!r.found) {
       msg('<div class="note" style="padding:10px 0 0">🤷 Не удалось определить товар.' + (r.note ? '<br>' + esc(r.note) : '') +
@@ -609,8 +628,14 @@ async function aiRun(text, file) {
     }
     aiApply(r);
   } catch (e) {
+    clearInterval(tick);
+    haptic('error');
+    window.__aiRetry = () => aiRun(text, file);
+    if (!cancelled()) openSheet('<h2>⚠️ Не получилось</h2><div class="sub">' + esc(e.message) + '</div>' +
+      '<div class="btns"><button class="btn sec" data-cancel>Закрыть</button><button class="btn" data-airetry>🔁 Повторить</button></div>');
     msg('<div class="note" style="padding:10px 0 0;color:var(--bad)">⚠️ ' + esc(e.message) + '</div>');
   } finally {
+    clearInterval(tick);
     aiBusy = false;
     const f = $('aiFile'); if (f) f.value = '';
   }
