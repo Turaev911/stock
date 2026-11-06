@@ -118,6 +118,22 @@
   .aibox .go { flex: none; width: 52px; }
   label.btn { display: flex; align-items: center; justify-content: center; }
   .ai-filled { box-shadow: inset 3px 0 0 var(--btn); }
+  /* Сборки */
+  .slot { background: var(--card); border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; }
+  .slot .sh { display: flex; justify-content: space-between; align-items: center; font-weight: 600; }
+  .slot .add { color: var(--link); font-weight: 500; padding: 4px 0 4px 10px; }
+  .bpart { display: flex; gap: 8px; align-items: center; padding: 8px 0; border-top: 1px solid var(--sep); }
+  .bpart .t { flex: 1; min-width: 0; }
+  .bpart .n { font-size: 14px; word-break: break-word; }
+  .bpart .m { color: var(--hint); font-size: 12px; margin-top: 2px; }
+  .bpart .m.bad { color: var(--bad); }
+  .mini { display: flex; align-items: center; gap: 4px; flex: none; }
+  .mini button { width: 32px; height: 32px; border-radius: 8px; background: var(--sec); font-size: 18px; }
+  .mini b { min-width: 26px; text-align: center; }
+  .st { flex: none; font-size: 12px; padding: 4px 8px; border-radius: 8px; font-weight: 600; }
+  .st.built { background: rgba(224,138,0,.15); color: var(--warn); }
+  .st.sold { background: rgba(31,157,85,.14); color: var(--ok); }
+  .row.off { opacity: .45; }
 
   /* Полноэкранный режим Telegram: не залезать под кнопки Telegram сверху */
   header { padding-top: calc(10px + var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px)); }
@@ -173,6 +189,11 @@ let cur = null;            // открытая карточка
 let newSheet = -1;         // лист для нового товара
 let draft = null;          // распознанный товар {si, title, fields, qs}
 let report = null, reportDays = 30;
+let bview = 'list', bfilter = 'built';   // сборки: список / новая; фильтр списка
+let curBuild = null;       // открытая карточка сборки
+const DRAFT_KEY = 'sklad_build_draft_v1';
+let bdraft = (() => { try { const s = localStorage.getItem(DRAFT_KEY); if (s) return JSON.parse(s); } catch (e) {} return { parts: [], client: '', comment: '' }; })();
+function saveDraft() { try { localStorage.setItem(DRAFT_KEY, JSON.stringify(bdraft)); } catch (e) {} }
 
 /* ---------- утилиты ---------- */
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -227,12 +248,13 @@ function setData(d) {
   $('hdr').classList.remove('hidden');
   // На вкладке «Новый» не перерисовываем форму, когда склад обновился в фоне: иначе пропадает набранный текст
   // и теряется выбранное фото (поле выбора файла исчезает из страницы, пока открыта камера).
-  renderTabs(); if (view !== 'new' || !had) renderMain();
+  renderTabs(); if (!(view === 'new' || (view === 'builds' && bview === 'new')) || !had) renderMain();
+  if (curBuild) { const b = (D.builds || []).find(x => x.no === curBuild.no); if (b) { curBuild = b; renderBuild(); } else closePage(); }
   if (cur) { const f = D.items.find(x => x.s === cur.s && x.id === cur.id); cur = f || null; if (cur) renderItem(); else closePage(); }
 }
 function saveCache() {
   if (DEMO || !D) return;
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ me: D.me, sheets: D.sheets, lowQty: D.lowQty, at: D.at,
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ me: D.me, sheets: D.sheets, lowQty: D.lowQty, at: D.at, slots: D.slots, builds: D.builds,
     items: D.items.map(({ hay, hayC, ...x }) => x) })); } catch (e) {}
 }
 function loadCache() { try { const s = localStorage.getItem(CACHE_KEY); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
@@ -263,7 +285,7 @@ function fatal(msg) {
 
 /* ---------- вкладки ---------- */
 function renderTabs() {
-  const t = [['stock', '📦 Склад'], ['low', '⚠️ Заканчивается'], ['sales', '📊 Продажи']];
+  const t = [['stock', '📦 Склад'], ['low', '⚠️ Заканчивается'], ['sales', '📊 Продажи'], ['builds', '🛠 Сборки']];
   if (canEdit()) t.push(['new', '➕ Новый']);
   $('tabs').innerHTML = t.map(([k, l]) => '<button class="tab' + (view === k ? ' on' : '') + '" data-tab="' + k + '">' + l + '</button>').join('');
 }
@@ -333,6 +355,7 @@ function renderMain() {
   else if (view === 'low') m.innerHTML = lowHtml();
   else if (view === 'sales') m.innerHTML = salesHtml();
   else if (view === 'new') m.innerHTML = newHtml();
+  else if (view === 'builds') m.innerHTML = buildsHtml();
 }
 
 function stockHtml() {
@@ -402,7 +425,7 @@ function openItem(it) {
   if (tg) tg.BackButton.show();
 }
 function closePage() {
-  cur = null; $('page').classList.add('hidden'); document.body.style.overflow = '';
+  cur = null; curBuild = null; $('page').classList.add('hidden'); document.body.style.overflow = '';
   if (tg) tg.BackButton.hide();
 }
 function renderItem() {
@@ -457,6 +480,7 @@ async function copyItem(kind) {
 $('page').addEventListener('click', e => {
   if (e.target.closest('[data-close]')) { closePage(); return; }
   const cp = e.target.closest('[data-copy]'); if (cp) { copyItem(cp.dataset.copy); return; }
+  if (e.target.closest('[data-bsell]')) { openBuildSell(); return; }
   const o = e.target.closest('[data-op]'); if (o) { openOp(o.dataset.op); return; }
   const f = e.target.closest('[data-edit]'); if (f) openEdit(f.dataset.edit);
 });
@@ -466,11 +490,12 @@ function openSheet(html) {
   $('sheet').innerHTML = html; $('shade').classList.remove('hidden');
   if (tg) tg.BackButton.show();
 }
-function closeSheet() { $('shade').classList.add('hidden'); if (tg && !cur) tg.BackButton.hide(); }
+function closeSheet() { $('shade').classList.add('hidden'); if (tg && !cur && !curBuild && !(view === 'builds' && bview === 'new')) tg.BackButton.hide(); }
 $('shade').addEventListener('click', e => { if (e.target.id === 'shade' || e.target.closest('[data-cancel]')) closeSheet(); });
 function goBack() {
   if (!$('shade').classList.contains('hidden')) closeSheet();
-  else if (cur) closePage();
+  else if (cur || curBuild) closePage();
+  else if (view === 'builds' && bview === 'new') { bview = 'list'; renderMain(); if (tg) tg.BackButton.hide(); }
 }
 async function busy(btn, fn) {
   const t = btn.textContent; btn.disabled = true; btn.textContent = 'Записываю…';
@@ -669,6 +694,171 @@ function confirmNew() {
     await refresh(true);
     view = 'stock'; cat = newSheet; renderTabs(); renderMain();
   }));
+}
+
+/* ---------- сборки серверов ---------- */
+// Раздел сборки по названию листа (если таблица не прислала — считаем сами, так же, как скрипт)
+const SLOT_RE = [['Платформа', /server|сервер|платформ/i], ['Процессор', /cpu|процессор/i], ['Память', /^\s*ram|памят|memory/i],
+  ['SSD', /ssd|nvme/i], ['HDD', /hdd/i], ['Сеть / FC', /network|сет|nic|\bfc\b/i], ['RAID', /raid/i], ['Блок питания', /psu|блок/i],
+  ['GPU', /gpu|видео/i], ['Охлаждение', /heatsink|fan|радиат|вентил|кулер/i], ['Корзина', /cage|корзин/i], ['Прочее', /[\s\S]*/]];
+const slotOf = sh => sh.slot || SLOT_RE.find(s => s[1].test(sh.name))[0];
+const slotList = () => D.slots || SLOT_RE.map(s => s[0]);
+const bItem = p => D.items.find(x => x.s === p.s && x.id === p.id);
+const fmtDate = s => { if (!s) return ''; const d = new Date(s); return isNaN(d) ? String(s) : d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); };
+const isSold = b => /продан/i.test(b.st);
+
+function buildsHtml() {
+  if (bview === 'new' && canEdit()) return buildFormHtml();
+  const B = D.builds || [];
+  const nb = B.filter(b => !isSold(b)).length, ns = B.length - nb;
+  const list = B.filter(b => bfilter === 'all' || (bfilter === 'sold') === isSold(b));
+  let h = (canEdit() ? '<button class="btn" id="bnew" style="width:100%;margin-bottom:10px">➕ Новая сборка' +
+    (bdraft.parts.length ? ' (черновик: ' + bdraft.parts.length + ' поз.)' : '') + '</button>' : '') +
+    '<div class="chips">' + [['built', '🟡 На складе', nb], ['sold', '🟢 Проданы', ns], ['all', 'Все', B.length]].map(([k, l, n]) =>
+      '<button class="chip' + (bfilter === k ? ' on' : '') + '" data-bfilter="' + k + '">' + l + ' <small>' + n + '</small></button>').join('') + '</div>';
+  if (!list.length) return h + '<div class="empty">' + (B.length ? 'Здесь пусто' : 'Сборок пока нет.<br>Нажмите «➕ Новая сборка» и выберите детали со склада.') + '</div>';
+  return h + '<div class="list">' + list.slice(0, LIST_LIMIT).map(b => {
+    const main = (b.parts.find(p => p.l === 'Платформа') || b.parts[0] || { t: '' }).t.split('\n')[0].replace(/^\d+×\s*/, '');
+    return '<button class="row" data-build="' + b.no + '"><div class="t"><div class="n">№' + b.no + ' · ' + esc(oneLine(main || 'Сборка')) + '</div>' +
+      '<div class="m">' + (isSold(b) ? esc(b.cl) + ' · ' + fmtDate(b.sd) : 'собрал ' + esc(b.by) + ' · ' + fmtDate(b.d)) + '</div></div>' +
+      '<span class="st ' + (isSold(b) ? 'sold">Продан' : 'built">Собран') + '</span></button>';
+  }).join('') + '</div>';
+}
+
+function buildFormHtml() {
+  const total = bdraft.parts.reduce((s, p) => s + p.q, 0);
+  let bad = false;
+  let h = '<button class="back" id="bback">← К списку сборок</button>' +
+    '<div class="note">Выберите детали со склада. Остатки спишутся только после нажатия «Собрать». Если детали нет в таблице — сначала добавьте её (➕ Новый или 📥 Приход).</div>';
+  const used = { 'Прочее': true };   // «Прочее» — поиск по всем листам
+  D.sheets.forEach(sh => { used[slotOf(sh)] = true; });
+  slotList().forEach(label => {
+    const mine = bdraft.parts.map((p, i) => ({ p: p, i: i })).filter(x => { const it = bItem(x.p); return it ? slotOf(D.sheets[it.s]) === label : label === 'Прочее'; });
+    if (!used[label] && !mine.length) return;
+    h += '<div class="slot"><div class="sh"><span>' + esc(label) + (mine.length ? ' <small style="color:var(--hint);font-weight:400">· ' + mine.reduce((s, x) => s + x.p.q, 0) + ' шт.</small>' : '') + '</span>' +
+      '<button class="add" data-badd="' + esc(label) + '">＋ Добавить</button></div>' +
+      mine.map(({ p, i }) => {
+        const it = bItem(p);
+        const over = !it || p.q > it.q; if (over) bad = true;
+        return '<div class="bpart"><div class="t"><div class="n">' + esc(it ? oneLine(it.n) : 'Товар не найден — удалите строку') + '</div>' +
+          '<div class="m' + (over ? ' bad' : '') + '">' + (it ? esc(sheetName(it)) + ' · ID ' + it.id + ' · на складе ' + it.q + ' шт.' + (over ? ' — не хватает!' : '') : '') + '</div></div>' +
+          '<div class="mini"><button data-bq="' + i + '" data-d="-1">−</button><b>' + p.q + '</b><button data-bq="' + i + '" data-d="1">+</button>' +
+          '<button data-brm="' + i + '" title="Убрать">✕</button></div></div>';
+      }).join('') + '</div>';
+  });
+  h += '<div class="card"><div class="lbl" style="margin-top:0">Клиент (обязательно, если продаёте сразу)</div><input class="inp" id="bcl" maxlength="200" autocomplete="off" value="' + esc(bdraft.client) + '">' +
+    '<div class="lbl">Комментарий (необязательно)</div><input class="inp" id="bcm" maxlength="500" autocomplete="off" value="' + esc(bdraft.comment) + '">' +
+    '<div class="preview">Деталей в сборке: <b>' + total + '</b> шт.' + (bad ? '<br><span style="color:var(--bad)">Некоторых деталей не хватает на складе.</span>' : '') + '</div>' +
+    '<div class="btns" style="flex-direction:column"><button class="btn" id="bmk"' + (!total || bad ? ' disabled' : '') + '>🟡 Собрать (оставить на складе)</button>' +
+    '<button class="btn" id="bsl" style="background:var(--ok)"' + (!total || bad ? ' disabled' : '') + '>🟢 Собрать и продать</button>' +
+    (bdraft.parts.length ? '<button class="btn sec" id="bclr">🗑 Очистить черновик</button>' : '') + '</div></div>';
+  return h;
+}
+
+function openPicker(label) {
+  const sheetsOk = D.sheets.map((sh, i) => label === 'Прочее' || slotOf(sh) === label ? i : -1).filter(i => i >= 0);
+  openSheet('<h2>＋ ' + esc(label) + '</h2><div class="sub">Нажмите на деталь, чтобы добавить. Серые — нет на складе.</div>' +
+    '<div class="search" style="margin-bottom:10px">🔎<input id="bps" type="search" placeholder="Модель, P/N, объём…" autocomplete="off"></div><div id="bpl"></div>');
+  const draw = () => {
+    const tokens = norm($('bps').value).split(' ').filter(Boolean);
+    let items = D.items.filter(it => sheetsOk.indexOf(it.s) >= 0 && tokens.every(t => it.hay.indexOf(t) >= 0 || (t.length >= 4 && it.hayC.indexOf(t.replace(/[\-\/.]/g, '')) >= 0)));
+    items.sort((a, b) => (b.q > 0) - (a.q > 0) || b.s60 - a.s60);
+    $('bpl').innerHTML = items.length ? '<div class="list">' + items.slice(0, 80).map(it =>
+      '<button class="row' + (it.q > 0 ? '' : ' off') + '" data-bpick="' + it.s + ':' + it.id + '"><div class="t"><div class="n">' + esc(oneLine(it.n)) + '</div>' +
+      '<div class="m">' + esc(sheetName(it)) + ' · ID ' + it.id + '</div></div><span class="qty ' + qtyClass(it.q) + '">' + (it.q > 0 ? it.q : '0') + '</span></button>').join('') + '</div>' +
+      (items.length > 80 ? '<div class="more">Показано 80 из ' + items.length + ' — уточните поиск</div>' : '')
+      : '<div class="empty">Ничего не найдено.<br>Если детали нет в таблице — сначала добавьте её.</div>';
+  };
+  $('bps').addEventListener('input', draw);
+  draw();
+}
+
+document.addEventListener('click', e => {
+  if (e.target.id === 'bnew') { bview = 'new'; renderMain(); window.scrollTo(0, 0); if (tg) tg.BackButton.show(); return; }
+  if (e.target.id === 'bback') { bview = 'list'; renderMain(); if (tg) tg.BackButton.hide(); return; }
+  const f = e.target.closest('[data-bfilter]'); if (f) { bfilter = f.dataset.bfilter; renderMain(); return; }
+  const bb = e.target.closest('[data-build]'); if (bb) { openBuild(Number(bb.dataset.build)); return; }
+  const a = e.target.closest('[data-badd]'); if (a) { openPicker(a.dataset.badd); return; }
+  const pk = e.target.closest('[data-bpick]');
+  if (pk) {
+    const [s, id] = pk.dataset.bpick.split(':').map(Number);
+    const it = D.items.find(x => x.s === s && x.id === id);
+    if (!it) return;
+    if (it.q <= 0) { toast('Этой детали нет на складе. Сначала сделайте «📥 Приход».'); return; }
+    const ex = bdraft.parts.find(p => p.s === s && p.id === id);
+    if (ex) ex.q = Math.min(ex.q + 1, it.q); else bdraft.parts.push({ s: s, id: id, q: 1 });
+    saveDraft(); closeSheet(); renderMain(); haptic('success');
+    return;
+  }
+  const q = e.target.closest('[data-bq]');
+  if (q) { const p = bdraft.parts[Number(q.dataset.bq)]; if (p) { p.q = Math.max(1, p.q + Number(q.dataset.d)); saveDraft(); renderMain(); } return; }
+  const rm = e.target.closest('[data-brm]');
+  if (rm) { bdraft.parts.splice(Number(rm.dataset.brm), 1); saveDraft(); renderMain(); return; }
+  if (e.target.id === 'bclr') { bdraft = { parts: [], client: '', comment: '' }; saveDraft(); renderMain(); return; }
+  if (e.target.id === 'bmk') confirmBuild(false);
+  if (e.target.id === 'bsl') confirmBuild(true);
+});
+document.addEventListener('input', e => {
+  if (e.target.id === 'bcl') { bdraft.client = e.target.value; saveDraft(); }
+  if (e.target.id === 'bcm') { bdraft.comment = e.target.value; saveDraft(); }
+});
+
+function confirmBuild(sell) {
+  if (sell && !bdraft.client.trim()) { toast('Напишите клиента — кому продаёте сборку.'); const c = $('bcl'); if (c) c.focus(); return; }
+  const rows = bdraft.parts.map(p => ({ p: p, it: bItem(p) }));
+  if (rows.some(r => !r.it || r.p.q > r.it.q)) { toast('Некоторых деталей не хватает — проверьте список.'); return; }
+  const groups = {};
+  rows.forEach(r => { const l = slotOf(D.sheets[r.it.s]); (groups[l] = groups[l] || []).push(r); });
+  openSheet('<h2>' + (sell ? '🟢 Собрать и продать' : '🟡 Собрать на склад') + '</h2><div class="sub">Эти детали спишутся со склада:</div>' +
+    '<div class="card" style="padding:4px 12px;background:var(--sec)">' + slotList().filter(l => groups[l]).map(l =>
+      '<div class="kv"><span>' + esc(l) + '</span><span>' + groups[l].map(r => r.p.q + '× ' + esc(oneLine(r.it.n))).join('<br>') + '</span></div>').join('') +
+    (sell ? '<div class="kv"><span>Клиент</span><span>' + esc(bdraft.client.trim()) + '</span></div>' : '') +
+    (bdraft.comment.trim() ? '<div class="kv"><span>Комментарий</span><span>' + esc(bdraft.comment.trim()) + '</span></div>' : '') +
+    '</div><div class="btns"><button class="btn sec" data-cancel>Отмена</button><button class="btn" id="bok">✅ Подтвердить</button></div>');
+  $('bok').addEventListener('click', () => busy($('bok'), async () => {
+    const j = await api('build', { sell: sell, client: bdraft.client.trim(), comment: bdraft.comment.trim(),
+      parts: rows.map(r => ({ sheet: D.sheets[r.it.s].name, row: r.it.r, id: r.it.id, name: r.it.n, q: r.p.q })) });
+    bdraft = { parts: [], client: '', comment: '' }; saveDraft();
+    bview = 'list'; bfilter = sell ? 'sold' : 'built';
+    closeSheet(); if (tg) tg.BackButton.hide(); haptic('success'); toast(j.message, 6000);
+    renderMain();
+    await refresh(true);
+  }));
+}
+
+/* карточка сборки */
+function openBuild(no) {
+  const b = (D.builds || []).find(x => x.no === no); if (!b) return;
+  cur = null; curBuild = b; renderBuild();
+  $('page').classList.remove('hidden'); $('page').scrollTop = 0;
+  document.body.style.overflow = 'hidden';
+  if (tg) tg.BackButton.show();
+}
+function renderBuild() {
+  const b = curBuild;
+  let h = (tg && tg.initData ? '' : '<button class="back" data-close>← Назад</button>') +
+    '<div class="card"><div class="title">Сборка №' + b.no + ' <span class="st ' + (isSold(b) ? 'sold">Продан' : 'built">Собран') + '</span></div>' +
+    '<div class="kv"><span>Собрал</span><span>' + esc(b.by) + ' · ' + fmtDate(b.d) + '</span></div>' +
+    (isSold(b) ? '<div class="kv"><span>Клиент</span><span>' + esc(b.cl) + '</span></div><div class="kv"><span>Продал</span><span>' + esc(b.sb) + ' · ' + fmtDate(b.sd) + '</span></div>' : '') +
+    (b.cm ? '<div class="kv"><span>Комментарий</span><span style="white-space:pre-line">' + esc(b.cm) + '</span></div>' : '') + '</div>';
+  if (!isSold(b) && canEdit()) h += '<div class="ops"><button class="op wide" data-bsell style="background:var(--ok);color:#fff">🟢 Продать эту сборку</button></div>';
+  h += '<h3>Состав</h3><div class="card">' + b.parts.map(p => '<div class="kv"><span>' + esc(p.l) + '</span><span style="white-space:pre-line">' + esc(p.t) + '</span></div>').join('') + '</div>';
+  $('page').innerHTML = h;
+}
+function openBuildSell() {
+  const b = curBuild; if (!b) return;
+  openSheet('<h2>🟢 Продать сборку №' + b.no + '</h2><div class="sub">Детали уже списаны при сборке — сейчас меняется только статус.</div>' +
+    '<div class="lbl">Клиент</div><input id="bscl" class="inp" maxlength="200" autocomplete="off">' +
+    '<div class="lbl">Комментарий (необязательно)</div><input id="bscm" class="inp" maxlength="500" autocomplete="off">' +
+    '<div class="btns"><button class="btn sec" data-cancel>Отмена</button><button class="btn" id="bsok">✅ Продано</button></div>');
+  $('bsok').addEventListener('click', () => {
+    if (!$('bscl').value.trim()) { toast('Напишите клиента.'); return; }
+    busy($('bsok'), async () => {
+      const j = await api('buildsell', { no: b.no, client: $('bscl').value.trim(), comment: $('bscm').value.trim() });
+      closeSheet(); haptic('success'); toast(j.message, 5000);
+      await refresh(true);
+    });
+  });
 }
 
 /* ---------- демо (просмотр без Telegram) ---------- */
