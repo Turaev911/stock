@@ -135,6 +135,14 @@
   .st.sold { background: rgba(31,157,85,.14); color: var(--ok); }
   .row.off { opacity: .45; }
 
+  /* Компьютер (мышь): видимая тонкая полоса прокрутки у вкладок и кнопок листов, курсор-«рука» для перетаскивания */
+  @media (hover: hover) and (pointer: fine) {
+    .tabs, .chips { scrollbar-width: thin; scrollbar-color: rgba(127,127,127,.45) transparent; cursor: grab; }
+    .tabs::-webkit-scrollbar, .chips::-webkit-scrollbar { display: block; height: 6px; }
+    .tabs::-webkit-scrollbar-thumb, .chips::-webkit-scrollbar-thumb { background: rgba(127,127,127,.45); border-radius: 3px; }
+    .tabs::-webkit-scrollbar-track, .chips::-webkit-scrollbar-track { background: transparent; }
+    .tabs.dragging, .chips.dragging { cursor: grabbing; user-select: none; }
+  }
   /* Полноэкранный режим Telegram: не залезать под кнопки Telegram сверху */
   header { padding-top: calc(10px + var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px)); }
   #page { padding-top: calc(12px + var(--tg-safe-area-inset-top, 0px) + var(--tg-content-safe-area-inset-top, 0px)); }
@@ -860,6 +868,43 @@ function openBuildSell() {
     });
   });
 }
+
+/* ---------- прокрутка вкладок и кнопок листов мышью (компьютер) ---------- */
+// Колесо мыши крутит строку влево-вправо; строку можно тянуть мышью. На телефоне ничего не меняется.
+const HSCROLL = '.tabs, .chips';
+document.addEventListener('wheel', e => {
+  const el = e.target.closest && e.target.closest(HSCROLL);
+  if (!el || el.scrollWidth <= el.clientWidth + 1 || e.ctrlKey) return;
+  const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+  if (!d) return;
+  const max = el.scrollWidth - el.clientWidth;
+  if ((d < 0 && el.scrollLeft <= 0) || (d > 0 && el.scrollLeft >= max - 1)) return;   // дошли до края — крутим страницу
+  el.scrollLeft += d * (e.deltaMode === 1 ? 32 : 1);
+  e.preventDefault();
+}, { passive: false });
+let hDrag = null;
+document.addEventListener('pointerdown', e => {
+  if (e.pointerType !== 'mouse' || e.button !== 0) return;
+  const el = e.target.closest && e.target.closest(HSCROLL);
+  if (!el || el.scrollWidth <= el.clientWidth + 1) return;
+  hDrag = { el: el, x: e.clientX, left: el.scrollLeft, moved: false };
+});
+document.addEventListener('pointermove', e => {
+  if (!hDrag) return;
+  const dx = e.clientX - hDrag.x;
+  if (!hDrag.moved && Math.abs(dx) < 6) return;
+  hDrag.moved = true; hDrag.el.classList.add('dragging');
+  hDrag.el.scrollLeft = hDrag.left - dx;
+});
+document.addEventListener('pointerup', () => {
+  if (!hDrag) return;
+  const d = hDrag; hDrag = null; d.el.classList.remove('dragging');
+  if (d.moved) {   // тянули строку — не считаем это нажатием на кнопку
+    const stop = ev => { ev.stopPropagation(); ev.preventDefault(); };
+    document.addEventListener('click', stop, { capture: true, once: true });
+    setTimeout(() => document.removeEventListener('click', stop, { capture: true }), 50);
+  }
+});
 
 /* ---------- демо (просмотр без Telegram) ---------- */
 function demoApi(action, p) {
