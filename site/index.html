@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Склад AI PRO SERVER</title>
+<style>
+  :root {
+    --ink: #10231e; --hint: #6b7f78; --dark: #0e3b31; --dark2: #145244; --mint: #dff0e8;
+    --card: rgba(255,255,255,.74); --line: rgba(16,35,30,.08);
+    --accent: #e8884a; --accent2: #f6c9a8; --green: #1f9d6b; --warn: #e08a00; --bad: #d64545;
+    --shadow: 0 10px 30px -12px rgba(16,60,48,.25);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; min-height: 100%; color: var(--ink);
+    font: 15px/1.4 "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; }
+  body { background:
+    radial-gradient(1100px 700px at 8% -5%, #cfe9dc 0, transparent 60%),
+    radial-gradient(900px 600px at 100% 100%, #f7e2d0 0, transparent 55%), #eaf3ee; background-attachment: fixed; }
+  button { font: inherit; color: inherit; border: 0; background: none; cursor: pointer; }
+  input { font: inherit; color: inherit; }
+  .hidden { display: none !important; }
+
+  .shell { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 18px; padding: 18px; min-height: 100vh; max-width: 1500px; margin: 0 auto; }
+
+  /* боковая панель */
+  nav.side { position: sticky; top: 18px; height: calc(100vh - 36px); background: linear-gradient(180deg, var(--dark2), #0a2b24);
+    border-radius: 30px; display: flex; flex-direction: column; align-items: center; padding: 18px 0; gap: 10px; box-shadow: var(--shadow); }
+  .logo { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 18px;
+    letter-spacing: -1px; margin-bottom: 10px; background: rgba(255,255,255,.08); }
+  .nb { position: relative; width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; color: rgba(255,255,255,.62);
+    transition: background .25s, color .25s, transform .25s; }
+  .nb svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+  .nb:hover { color: #fff; background: rgba(255,255,255,.1); transform: scale(1.06); }
+  .nb.on { background: var(--mint); color: var(--dark); }
+  .nb::after { content: attr(data-tip); position: absolute; left: 58px; top: 50%; transform: translateY(-50%) translateX(-4px); background: var(--dark);
+    color: #fff; padding: 5px 10px; border-radius: 8px; font-size: 13px; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity .2s, transform .2s; z-index: 5; }
+  .nb:hover::after { opacity: 1; transform: translateY(-50%); }
+  .sp { flex: 1; }
+  .badge { position: absolute; top: 2px; right: 0; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--accent);
+    color: #fff; font-size: 11px; font-weight: 700; display: grid; place-items: center; }
+
+  main { min-width: 0; }
+  .top { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .top h1 { margin: 0; font-size: 22px; font-weight: 700; flex: 1; }
+  .top h1 small { display: block; font-size: 13px; font-weight: 400; color: var(--hint); }
+  .search { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 0 14px; height: 44px; width: min(340px, 40vw); backdrop-filter: blur(10px); }
+  .search input { border: 0; outline: 0; background: transparent; flex: 1; min-width: 0; height: 100%; }
+  .who { display: flex; align-items: center; gap: 8px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 4px 14px 4px 5px; height: 44px; backdrop-filter: blur(10px); }
+  .ava { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(135deg, var(--accent), #c9622a); color: #fff; display: grid; place-items: center; font-weight: 700; }
+
+  .page { animation: in .45s cubic-bezier(.2,.8,.2,1) both; }
+  .noanim .card, .noanim.page { animation: none !important; }
+  .noanim .bars .col i, .noanim .seg i b { transition: none; }
+
+  /* экран входа */
+  .login .shell { grid-template-columns: minmax(0, 1fr); }
+  .login nav.side, .login .search, .login .who, .login #refresh, .login #logout, .login .top h1 { display: none; }
+  .login main { display: grid; place-items: center; min-height: calc(100vh - 36px); }
+  .lg { max-width: 420px; width: 100%; text-align: center; padding: 30px 26px; }
+  .lg .logo2 { width: 56px; height: 56px; border-radius: 18px; margin: 0 auto 14px; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 24px;
+    background: linear-gradient(150deg, var(--dark2), var(--dark)); letter-spacing: -1px; }
+  .lg h2 { margin: 0 0 6px; font-size: 22px; } .lg p { margin: 0 0 14px; color: var(--hint); }
+  .lg ol { text-align: left; margin: 0 0 16px; padding-left: 20px; color: var(--ink); } .lg li { margin: 4px 0; }
+  .lg input { width: 100%; text-align: center; font-size: 28px; letter-spacing: 8px; font-weight: 650; padding: 12px; border-radius: 16px; border: 1px solid var(--line); background: rgba(255,255,255,.8); outline: 0; }
+  .lg input:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(31,157,107,.18); }
+  .lg .btn { width: 100%; justify-content: center; margin-top: 12px; padding: 13px; font-size: 16px; }
+  .lg .err { color: var(--bad); margin-top: 10px; font-size: 14px; min-height: 20px; }
+  .topbtn { height: 44px; padding: 0 14px; border-radius: 16px; background: var(--card); border: 1px solid var(--line); backdrop-filter: blur(10px); font-size: 14px; transition: transform .2s; }
+  .topbtn:hover { transform: translateY(-2px); }
+  #toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 30; background: rgba(20,30,28,.92); color: #fff; padding: 11px 16px; border-radius: 14px; font-size: 14px; max-width: 90vw; }
+  @keyframes in { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+
+  .grid { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; }
+  .c4 { grid-column: span 4; } .c3 { grid-column: span 3; } .c5 { grid-column: span 5; } .c6 { grid-column: span 6; } .c7 { grid-column: span 7; } .c8 { grid-column: span 8; } .c12 { grid-column: span 12; }
+  .card { background: var(--card); border: 1px solid rgba(255,255,255,.7); border-radius: 24px; padding: 18px; box-shadow: var(--shadow); backdrop-filter: blur(14px);
+    transition: transform .3s cubic-bezier(.2,.8,.2,1), box-shadow .3s; animation: in .5s cubic-bezier(.2,.8,.2,1) both; }
+  .card:hover { transform: translateY(-3px); box-shadow: 0 18px 38px -14px rgba(16,60,48,.32); }
+  .card h3 { margin: 0 0 12px; font-size: 15px; font-weight: 650; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .card h3 span { font-weight: 400; color: var(--hint); font-size: 13px; }
+  .grid > .card:nth-child(2) { animation-delay: .05s; } .grid > .card:nth-child(3) { animation-delay: .1s; } .grid > .card:nth-child(4) { animation-delay: .15s; }
+  .grid > .card:nth-child(5) { animation-delay: .2s; } .grid > .card:nth-child(6) { animation-delay: .25s; } .grid > .card:nth-child(7) { animation-delay: .3s; }
+
+  .hero { background: linear-gradient(120deg, var(--dark), var(--dark2)); color: #fff; border: 0; display: flex; flex-direction: column; justify-content: center; gap: 6px; min-height: 150px; position: relative; overflow: hidden; }
+  .hero::after { content: ""; position: absolute; right: -60px; top: -60px; width: 220px; height: 220px; border-radius: 50%; background: radial-gradient(circle, rgba(232,136,74,.45), transparent 70%); }
+  .hero h2 { margin: 0; font-size: 26px; font-weight: 600; position: relative; z-index: 1; }
+  .hero h2 em { font-family: Georgia, "Times New Roman", serif; font-weight: 400; color: var(--accent2); }
+  .hero p { margin: 0; color: rgba(255,255,255,.7); max-width: 460px; position: relative; z-index: 1; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; align-self: flex-start; margin-top: 8px; background: var(--accent); color: #fff; font-weight: 600; padding: 10px 16px; border-radius: 14px; position: relative; z-index: 1; transition: transform .2s, filter .2s; }
+  .btn:hover { transform: translateY(-2px); filter: brightness(1.06); }
+
+  .big { font-size: 38px; font-weight: 700; letter-spacing: -1px; line-height: 1.1; }
+  .big small { font-size: 16px; font-weight: 500; color: var(--hint); letter-spacing: 0; margin-left: 4px; }
+  .sub { color: var(--hint); font-size: 13px; margin-top: 2px; }
+  .seg { display: flex; gap: 4px; height: 8px; margin: 14px 0 8px; }
+  .seg i { flex: 1; border-radius: 4px; background: rgba(16,35,30,.08); overflow: hidden; }
+  .seg i b { display: block; height: 100%; width: 0; background: var(--green); border-radius: 4px; transition: width 1s cubic-bezier(.2,.8,.2,1); }
+  .leg { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; color: var(--hint); }
+  .leg b { color: var(--ink); }
+
+  .bars { display: flex; align-items: flex-end; gap: 10px; height: 150px; margin-top: 6px; }
+  .bars div { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 6px; height: 100%; justify-content: flex-end; }
+  .bars .col { width: 100%; max-width: 38px; background: rgba(16,35,30,.06); border-radius: 18px; height: 112px; display: flex; align-items: flex-end; overflow: hidden; position: relative; }
+  .bars .col i { width: 100%; height: 0; border-radius: 18px; background: linear-gradient(180deg, #f3a572, var(--accent)); transition: height 1s cubic-bezier(.2,.8,.2,1); }
+  .bars .col.today i { background: linear-gradient(180deg, var(--dark2), var(--dark)); }
+  .bars span { font-size: 12px; color: var(--hint); } .bars .today + span, .bars span.t { color: var(--ink); font-weight: 600; }
+  .bars em { font-style: normal; font-size: 12px; font-weight: 600; }
+
+  .list { display: flex; flex-direction: column; }
+  .it { display: flex; align-items: center; gap: 12px; padding: 11px 4px; border-bottom: 1px solid var(--line); text-align: left; width: 100%; border-radius: 10px; transition: background .2s; }
+  .it:last-child { border-bottom: 0; }
+  button.it:hover { background: rgba(255,255,255,.6); }
+  .ico { flex: none; width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; font-size: 17px; background: var(--mint); }
+  .ico.out { background: #fde7d6; } .ico.in { background: #dff0e8; } .ico.bld { background: #e3e8f7; }
+  .it .t { flex: 1; min-width: 0; }
+  .it .n { overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word; }
+  .it .m { color: var(--hint); font-size: 12px; margin-top: 2px; }
+  .q { flex: none; min-width: 48px; text-align: center; padding: 5px 10px; border-radius: 10px; font-weight: 650; font-size: 14px; background: rgba(31,157,107,.14); color: var(--green); }
+  .q.low { background: rgba(224,138,0,.15); color: var(--warn); } .q.zero { background: rgba(120,130,125,.15); color: var(--hint); }
+  .tag { flex: none; font-size: 12px; font-weight: 650; padding: 4px 10px; border-radius: 10px; }
+  .tag.built { background: rgba(224,138,0,.15); color: var(--warn); } .tag.sold { background: rgba(31,157,107,.14); color: var(--green); }
+
+  .minis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .mini { border-radius: 18px; padding: 14px; background: linear-gradient(160deg, #e6f3ec, #f4efe8); border: 1px solid rgba(255,255,255,.8); text-align: left; transition: transform .25s; display: flex; flex-direction: column; gap: 4px; }
+  .mini:hover { transform: translateY(-3px); }
+  .mini b { font-size: 13px; } .mini span { font-size: 12px; color: var(--hint); }
+  .dark { background: linear-gradient(150deg, var(--dark), #0a2b24); color: #fff; border: 0; }
+  .dark .sub { color: rgba(255,255,255,.65); }
+  .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; text-align: center; font-size: 12px; color: var(--hint); }
+  .cal b { display: grid; place-items: center; height: 34px; border-radius: 12px; font-weight: 600; color: var(--ink); font-size: 14px; background: rgba(255,255,255,.55); }
+  .cal b.today { background: var(--dark); color: #fff; }
+
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .chip { padding: 7px 13px; border-radius: 14px; background: var(--card); border: 1px solid var(--line); font-size: 14px; transition: background .2s, color .2s, transform .2s; }
+  .chip:hover { transform: translateY(-2px); } .chip small { opacity: .65; }
+  .chip.on { background: var(--dark); color: #fff; border-color: var(--dark); }
+  .empty { text-align: center; color: var(--hint); padding: 40px 16px; }
+  .part { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
+  .part:last-child { border-bottom: 0; } .part span:first-child { color: var(--hint); flex: none; } .part span:last-child { text-align: right; white-space: pre-line; }
+  .note { font-size: 12px; color: var(--hint); margin-top: 18px; text-align: center; }
+
+  @media (max-width: 1100px) { .c4, .c5, .c7, .c8, .c3 { grid-column: span 12; } .c6 { grid-column: span 12; } .grid .c3.half { grid-column: span 6; } }
+  @media (max-width: 760px) {
+    .shell { grid-template-columns: 1fr; padding: 12px 12px 92px; gap: 12px; }
+    nav.side { position: fixed; z-index: 10; left: 12px; right: 12px; bottom: 12px; top: auto; height: 68px; flex-direction: row; justify-content: space-around; padding: 0 8px; border-radius: 24px; }
+    .logo, .sp { display: none; } .nb::after { display: none; }
+    .search { width: auto; flex: 1; } .who span { display: none; } .who { padding: 4px; } .top h1 small { display: none; }
+    .top { flex-wrap: wrap; } .top h1 { flex-basis: 100%; }
+    .minis { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+  <nav class="side" id="nav"></nav>
+  <main>
+    <div class="top">
+      <h1 id="title">Обзор<small id="sub"></small></h1>
+      <label class="search">🔎<input id="q" type="search" placeholder="Модель, P/N, объём…" autocomplete="off"></label>
+      <button class="topbtn hidden" id="refresh" title="Обновить данные">⟳</button>
+      <div class="who"><div class="ava" id="ava">?</div><span id="whoName"></span></div>
+      <button class="topbtn hidden" id="logout" title="Выйти с сайта">Выйти</button>
+    </div>
+    <div id="view" class="page"></div>
+    <div class="note" id="foot"></div>
+    <div id="toast" class="hidden"></div>
+  </main>
+</div>
+
+<script>
+'use strict';
+/* Макет сайта-дашборда склада. Пока данные демонстрационные (DEMO_DATA + выдуманные операции).
+   Дальше этот же код получит настоящие данные из скрипта «Бот склада» после входа. */
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const oneLine = s => String(s).replace(/\s*\n\s*/g, ' · ').replace(/\s+/g, ' ').trim();
+
+/* ---------- данные ---------- */
+let D = null, X = null;
+// сборка из таблицы → карточка сайта (платформа + краткий состав)
+function mapBuild(b) {
+  const first = t => String(t || '').split('\n')[0];
+  const plat = b.parts.find(p => p.l === 'Платформа') || b.parts[0] || { t: '' };
+  return { no: b.no, st: b.st, who: b.by, cl: b.cl, p: first(plat.t).replace(/^\d+×\s*/, '') || 'Сборка',
+    n: b.parts.filter(p => p !== plat).map(p => first(p.t)).join(' · ') };
+}
+function buildX() {
+  const items = D.items;
+  const sheetName = it => D.sheets[it.s].name.trim();
+  const inStock = items.filter(i => i.q > 0);
+  const units = inStock.reduce((s, i) => s + i.q, 0);
+  const low = items.filter(i => i.q > 0 && i.q <= (D.lowQty || 2));
+  const by = {};
+  inStock.forEach(i => { const k = sheetName(i); by[k] = (by[k] || 0) + i.q; });
+  const cats = Object.keys(by).map(k => ({ name: k, units: by[k] })).sort((a, b) => b.units - a.units);
+  const top = items.filter(i => i.s30 > 0).sort((a, b) => b.s30 - a.s30);
+  const demo = !D.ops;
+  return {
+    units: units, positions: inStock.length, low: low, cats: cats, top: top, sheetName: sheetName,
+    sold30: D.sold30 != null ? D.sold30 : (demo ? 47 : items.reduce((s, i) => s + i.s30, 0)),
+    arrived30: D.arrived30 != null ? D.arrived30 : (demo ? 63 : 0),
+    week: D.week || [3, 7, 4, 9, 5, 2, 6],               // продажи по дням недели (Пн…Вс)
+    ops: D.ops || [
+      { k: 'sale', who: 'Окил', what: '2× Intel Xeon Gold 6140', cl: 'Artel', ago: '12 мин назад' },
+      { k: 'in', who: 'Умар', what: '8× RAM 32GB DDR4 3200 RDIMM', cl: 'Поставщик Tashkent IT', ago: '1 ч назад' },
+      { k: 'build', who: 'Олим', what: 'Сборка №3 · SUPERMICRO 4125GS', cl: '', ago: '3 ч назад' },
+      { k: 'sale', who: 'Окил', what: '4× SSD 960GB SATA Samsung PM893', cl: 'Uzum', ago: 'вчера' },
+      { k: 'in', who: 'Окил', what: '2× Mellanox ConnectX-4 25GbE', cl: 'Поставщик', ago: 'вчера' },
+    ],
+    builds: D.ops ? (D.builds || []).map(mapBuild) : [
+      { no: 3, st: 'Собран', p: 'SUPERMICRO 4125GS 4U', n: '2× Xeon Gold 6140 · 8× 32GB · 2× SSD', who: 'Олим' },
+      { no: 2, st: 'Продан', p: 'Dell R740 2U 12LFF', n: '2× Xeon Gold 6130 · 16× 32GB', who: 'Окил', cl: 'Artel' },
+      { no: 1, st: 'Продан', p: 'HPE DL380 Gen10 8SFF', n: '2× Xeon Silver 4214 · 8× 16GB', who: 'Умар', cl: 'Uzum' },
+    ],
+  };
+}
+
+/* ---------- навигация ---------- */
+const ICONS = {
+  home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
+  box: '<path d="M21 8l-9-5-9 5 9 5 9-5z"/><path d="M3 8v8l9 5 9-5V8"/><path d="M12 13v8"/>',
+  alert: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5"/><path d="M12 18h.01"/>',
+  tools: '<path d="M14.7 6.3a4 4 0 0 0-5.4 5.4L3 18l3 3 6.3-6.3a4 4 0 0 0 5.4-5.4l-2.6 2.6-2.4-.6-.6-2.4 2.6-2.6z"/>',
+  chart: '<path d="M4 20V10"/><path d="M10 20V4"/><path d="M16 20v-7"/><path d="M22 20H2"/>',
+};
+const PAGES = [['home', 'Обзор', 'home'], ['stock', 'Склад', 'box'], ['low', 'Заканчивается', 'alert'], ['builds', 'Сборки', 'tools'], ['sales', 'Продажи', 'chart']];
+let page = 'home', cat = -1, query = '', lastPage = '';
+function renderNav() {
+  const lowN = X.low.length;
+  $('nav').innerHTML = '<div class="logo">//</div>' + PAGES.map(([k, l, ic]) =>
+    '<button class="nb' + (page === k ? ' on' : '') + '" data-tip="' + l + '" data-p="' + k + '" aria-label="' + l + '"><svg viewBox="0 0 24 24">' + ICONS[ic] + '</svg>' +
+    (k === 'low' && lowN ? '<span class="badge">' + lowN + '</span>' : '') + '</button>').join('') + '<div class="sp"></div>';
+}
+document.addEventListener('click', e => {
+  const b = e.target.closest('[data-p]'); if (b) { go(b.dataset.p); return; }
+  const c = e.target.closest('[data-cat]'); if (c) { cat = Number(c.dataset.cat); render(); return; }
+});
+function go(p) { page = p; query = ''; $('q').value = ''; location.hash = p; render(); window.scrollTo(0, 0); }
+window.addEventListener('hashchange', () => { const p = location.hash.slice(1); if (PAGES.some(x => x[0] === p) && p !== page) { page = p; render(); } });
+$('q').addEventListener('input', e => { query = e.target.value; if (query.trim() && page !== 'stock') { page = 'stock'; } render(); });
+
+/* ---------- страницы ---------- */
+const norm = s => String(s).toLowerCase().replace(/ё/g, 'е').replace(/гб/g, 'gb').replace(/тб/g, 'tb').replace(/\s+/g, ' ').trim();
+const qcls = q => q <= 0 ? 'zero' : q <= (D.lowQty || 2) ? 'low' : '';
+function rowHtml(it) {
+  return '<div class="it"><div class="t"><div class="n">' + esc(oneLine(it.n)) + '</div><div class="m">' + esc(X.sheetName(it)) + ' · ID ' + it.id +
+    (it.s60 ? ' · продано за 60 дн.: ' + it.s60 : '') + '</div></div><span class="q ' + qcls(it.q) + '">' + (it.q > 0 ? it.q : 0) + '</span></div>';
+}
+const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+function todayIdx() { return (new Date().getDay() + 6) % 7; }
+
+function homeHtml() {
+  const t = todayIdx(), maxW = Math.max.apply(null, X.week) || 1;
+  const tot = X.cats.reduce((s, c) => s + c.units, 0) || 1;
+  const topCats = X.cats.slice(0, 4);
+  const d = new Date(), mon = new Date(d); mon.setDate(d.getDate() - t);
+  const months = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+  const opIco = { sale: ['out', '📤'], in: ['in', '📥'], build: ['bld', '🛠'], other: ['bld', '📝'] };
+  return '<div class="grid">' +
+    '<div class="card hero c8"><h2>Склад AI PRO SERVER — <em>всё под контролем</em></h2>' +
+      '<p>' + X.positions + ' позиций в наличии, ' + X.units + ' шт. Продажи, приходы и сборки — в одном месте.</p>' +
+      '<button class="btn" data-p="builds">🛠 Собрать сервер</button></div>' +
+    '<div class="card c4"><h3>' + months[d.getMonth()] + ', ' + d.getFullYear() + '<span>сегодня</span></h3><div class="cal">' +
+      DAYS.map(x => '<span>' + x + '</span>').join('') +
+      DAYS.map((x, i) => { const dd = new Date(mon); dd.setDate(mon.getDate() + i); return '<b class="' + (i === t ? 'today' : '') + '">' + dd.getDate() + '</b>'; }).join('') + '</div></div>' +
+
+    '<div class="card c3 half"><h3>Всего штук</h3><div class="big"><span data-count="' + X.units + '">0</span><small>шт.</small></div><div class="sub">' + X.positions + ' позиций на складе</div></div>' +
+    '<div class="card c3 half"><h3>Продано за 30 дней</h3><div class="big"><span data-count="' + X.sold30 + '">0</span><small>шт.</small></div><div class="sub">пришло: ' + X.arrived30 + ' шт.</div></div>' +
+    '<div class="card c6"><h3>Что на складе<span>по категориям</span></h3><div class="seg">' +
+      topCats.map(c => '<i><b data-w="' + Math.max(8, Math.round(c.units / topCats[0].units * 100)) + '"></b></i>').join('') + '</div><div class="leg">' +
+      topCats.map(c => '<span>' + esc(c.name) + ' <b>' + c.units + '</b></span>').join('') + '</div></div>' +
+
+    '<div class="card c5"><h3>Продажи за неделю<span>шт. по дням</span></h3><div class="bars">' +
+      X.week.map((v, i) => '<div><em>' + v + '</em><div class="col' + (i === t ? ' today' : '') + '"><i data-h="' + Math.round(v / maxW * 100) + '"></i></div><span class="' + (i === t ? 't' : '') + '">' + DAYS[i] + '</span></div>').join('') + '</div></div>' +
+    '<div class="card c7"><h3>Последние операции<span>из журнала</span></h3><div class="list">' +
+      X.ops.map(o => '<div class="it"><div class="ico ' + opIco[o.k][0] + '">' + opIco[o.k][1] + '</div><div class="t"><div class="n">' + esc(o.what) + '</div><div class="m">' +
+        esc(o.who) + (o.cl ? ' · ' + esc(o.cl) : '') + ' · ' + esc(o.ago) + '</div></div></div>').join('') + '</div></div>' +
+
+    '<div class="card c7"><h3>Последние сборки<span>серверы</span></h3><div class="minis">' +
+      X.builds.slice(0, 3).map(b => '<button class="mini" data-p="builds"><span class="tag ' + (/продан/i.test(b.st) ? 'sold' : 'built') + '" style="align-self:flex-start">' + esc(b.st) + '</span><b>№' + b.no + ' ' + esc(b.p) + '</b><span>' + esc(b.n) + '</span></button>').join('') + '</div></div>' +
+    '<div class="card dark c5"><h3>Заканчивается<span style="color:rgba(255,255,255,.6)">' + X.low.length + ' поз.</span></h3><div class="list">' +
+      (X.low.slice(0, 4).map(i => '<div class="it" style="border-color:rgba(255,255,255,.1)"><div class="t"><div class="n">' + esc(oneLine(i.n)) + '</div><div class="m" style="color:rgba(255,255,255,.55)">' + esc(X.sheetName(i)) + '</div></div><span class="q low">' + i.q + '</span></div>').join('') || '<div class="sub">Всё в достатке 🎉</div>') +
+    '</div><button class="btn" data-p="low" style="margin-top:12px">Показать все</button></div>' +
+  '</div>';
+}
+
+function stockHtml() {
+  const names = D.sheets.map(s => s.name.trim());
+  const tokens = norm(query).split(' ').filter(Boolean);
+  let items = D.items.filter(i => i.q > 0 && (cat < 0 || i.s === cat) &&
+    tokens.every(t => norm(names[i.s] + ' ' + (i.v || []).join(' ') + ' ' + i.n).indexOf(t) >= 0));
+  const chips = '<button class="chip' + (cat < 0 ? ' on' : '') + '" data-cat="-1">Все <small>' + D.items.filter(i => i.q > 0).length + '</small></button>' +
+    D.sheets.map((s, k) => { const n = D.items.filter(i => i.s === k && i.q > 0).length; return n ? '<button class="chip' + (cat === k ? ' on' : '') + '" data-cat="' + k + '">' + esc(s.name.trim()) + ' <small>' + n + '</small></button>' : ''; }).join('');
+  return '<div class="chips">' + chips + '</div><div class="card"><h3>' + (query.trim() ? 'Найдено: ' + items.length : 'На складе: ' + items.length + ' поз.') + '</h3>' +
+    (items.length ? '<div class="list">' + items.slice(0, 150).map(rowHtml).join('') + '</div>' : '<div class="empty">Ничего не найдено</div>') + '</div>';
+}
+function lowHtml() {
+  const out = D.items.filter(i => i.q <= 0 && i.s60 > 0);
+  return '<div class="grid"><div class="card c6"><h3>Заканчивается<span>' + X.low.length + ' поз.</span></h3><div class="list">' +
+    (X.low.map(rowHtml).join('') || '<div class="empty">Всё в достатке</div>') + '</div></div>' +
+    '<div class="card c6"><h3>Закончились, но продавались<span>' + out.length + ' поз.</span></h3><div class="list">' +
+    (out.map(rowHtml).join('') || '<div class="empty">Нет таких</div>') + '</div></div></div>';
+}
+function buildsHtml() {
+  return '<div class="grid">' + X.builds.map(b => '<div class="card c4"><h3>Сборка №' + b.no + '<span class="tag ' + (/продан/i.test(b.st) ? 'sold' : 'built') + '">' + esc(b.st) + '</span></h3>' +
+    '<div class="part"><span>Платформа</span><span>' + esc(b.p) + '</span></div><div class="part"><span>Состав</span><span>' + esc(b.n) + '</span></div>' +
+    '<div class="part"><span>Собрал</span><span>' + esc(b.who) + '</span></div>' + (b.cl ? '<div class="part"><span>Клиент</span><span>' + esc(b.cl) + '</span></div>' : '') + '</div>').join('') + '</div>';
+}
+function salesHtml() {
+  const mx = Math.max.apply(null, X.cats.map(c => c.units)) || 1;
+  return '<div class="grid"><div class="card c6"><h3>Остатки по категориям<span>шт.</span></h3>' +
+    X.cats.map(c => '<div class="part"><span style="color:var(--ink)">' + esc(c.name) + '</span><span style="flex:1;margin:0 12px;align-self:center"><div class="seg" style="margin:0"><i style="background:rgba(16,35,30,.06)"><b data-w="' + Math.round(c.units / mx * 100) + '"></b></i></div></span><span>' + c.units + '</span></div>').join('') + '</div>' +
+    '<div class="card c6"><h3>Топ продаж за 30 дней<span>шт.</span></h3><div class="list">' +
+    (X.top.slice(0, 10).map(i => '<div class="it"><div class="t"><div class="n">' + esc(oneLine(i.n)) + '</div><div class="m">' + esc(X.sheetName(i)) + '</div></div><span class="q">' + i.s30 + '</span></div>').join('') || '<div class="empty">Пока нет данных</div>') + '</div></div></div>';
+}
+
+/* ---------- рисование и анимации ---------- */
+const TITLES = { home: ['Обзор', 'Сводка по складу'], stock: ['Склад', 'Всё, что есть в наличии'], low: ['Заканчивается', 'Что пора докупить'], builds: ['Сборки', 'Собранные серверы'], sales: ['Продажи', 'Что и сколько уходит'] };
+function render() {
+  if (!D) return;
+  X = buildX(); renderNav();
+  $('title').firstChild.nodeValue = TITLES[page][0]; $('sub').textContent = TITLES[page][1];
+  const v = $('view');
+  const same = lastPage === page; lastPage = page;   // тот же раздел (поиск, кнопки) — без повторной анимации
+  v.classList.toggle('noanim', same);
+  if (!same) { v.classList.remove('page'); void v.offsetWidth; v.classList.add('page'); }
+  v.innerHTML = ({ home: homeHtml, stock: stockHtml, low: lowHtml, builds: buildsHtml, sales: salesHtml })[page]();
+  requestAnimationFrame(() => requestAnimationFrame(animate));
+}
+function animate() {
+  const still = $('view').classList.contains('noanim');   // обновление данных или поиск — без «набегания» цифр
+  document.querySelectorAll('[data-count]').forEach(el => {
+    const end = Number(el.dataset.count), t0 = performance.now(), dur = still ? 0 : 1100;
+    if (still) { el.textContent = end; return; }
+    const step = now => { const k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3); el.textContent = Math.round(end * e); if (k < 1) requestAnimationFrame(step); };
+    requestAnimationFrame(step);
+  });
+  document.querySelectorAll('[data-h]').forEach(el => { el.style.height = el.dataset.h + '%'; });
+  document.querySelectorAll('[data-w]').forEach(el => { el.style.width = el.dataset.w + '%'; });
+}
+
+/* ---------- вход по коду из бота и загрузка данных ---------- */
+const API_URL = 'https://script.google.com/macros/s/AKfycbxzbPhxv0NFAqCPdbXx7AoWC_ecIhmXfdbz7mqJakzQp1oWA_oN9lEO3XKOrD_5EZ0/exec';
+const BOT = '@Aiproserverstock_bot';
+const TOKEN_KEY = 'sklad_web_token';
+let memToken = '';   // запасной вариант, если браузер не даёт хранить данные (приватное окно)
+const getToken = () => { if (memToken) return memToken; try { return localStorage.getItem(TOKEN_KEY) || ''; } catch (e) { return ''; } };
+const setToken = t => { memToken = t || ''; try { if (t) localStorage.setItem(TOKEN_KEY, t); else localStorage.removeItem(TOKEN_KEY); } catch (e) {} };
+let toastT = 0;
+function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), 4000); }
+
+async function api(body) {
+  let res;
+  try { res = await fetch(API_URL + '?api=1', { method: 'POST', body: JSON.stringify(body) }); }
+  catch (e) { throw new Error('Нет связи с таблицей. Проверьте интернет.'); }
+  let j;
+  try { j = await res.json(); } catch (e) { throw new Error('Таблица ответила с ошибкой. Попробуйте ещё раз.'); }
+  if (!j.ok) { const err = new Error(j.error || 'Ошибка'); err.code = j.code; throw err; }
+  return j;
+}
+
+function showLogin(msg) {
+  D = null; lastPage = '';
+  document.body.classList.add('login');
+  ['refresh', 'logout'].forEach(id => $(id).classList.add('hidden'));
+  $('foot').textContent = '';
+  const v = $('view'); v.classList.remove('noanim');
+  v.innerHTML = '<div class="card lg"><div class="logo2">//</div><h2>Вход на сайт склада</h2><p>Пускаем только сотрудников из листа «Сотрудники».</p>' +
+    '<ol><li>Откройте в Telegram бота <b>' + BOT + '</b></li><li>Напишите ему команду <b>/web</b></li><li>Введите 6-значный код, который пришлёт бот</li></ol>' +
+    '<input id="code" inputmode="numeric" maxlength="6" placeholder="••••••" autocomplete="one-time-code">' +
+    '<button class="btn" id="go">Войти</button><div class="err" id="err">' + esc(msg || '') + '</div></div>';
+  const code = $('code');
+  code.addEventListener('input', () => { code.value = code.value.replace(/\D/g, '').slice(0, 6); if (code.value.length === 6) doLogin(); });
+  code.addEventListener('keydown', e => { if (e.key === 'Enter') doLogin(); });
+  $('go').addEventListener('click', doLogin);
+  code.focus();
+}
+let loginBusy = false;
+async function doLogin() {
+  const code = ($('code') || {}).value || '';
+  if (loginBusy) return;
+  if (code.length !== 6) { $('err').textContent = 'Введите 6 цифр из бота.'; return; }
+  loginBusy = true; $('go').disabled = true; $('go').textContent = 'Проверяю…'; $('err').textContent = '';
+  try {
+    const j = await api({ action: 'weblogin', code: code });
+    setToken(j.token);
+    await load();
+  } catch (e) {
+    $('err').textContent = e.message; $('go').disabled = false; $('go').textContent = 'Войти'; $('code').value = ''; $('code').focus();
+  } finally { loginBusy = false; }
+}
+
+async function load(silent) {
+  try {
+    const j = await api({ action: 'init', web: true, token: getToken() });
+    delete j.ok;
+    D = j;
+    document.body.classList.remove('login');
+    ['refresh', 'logout'].forEach(id => $(id).classList.remove('hidden'));
+    $('whoName').textContent = D.me.name + ' · ' + D.me.role; $('ava').textContent = (D.me.name || '?').trim().charAt(0).toUpperCase();
+    const t = new Date(); $('foot').textContent = 'Данные из таблицы · обновлено ' + t.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) + ' · с сайта можно только смотреть';
+    if (lastPage === '') { const p = location.hash.slice(1); if (PAGES.some(x => x[0] === p)) page = p; }
+    render();
+    if (!silent) toast('✅ Данные загружены');
+  } catch (e) {
+    if (e.code === 'auth') { setToken(''); showLogin(e.message); }
+    else if (!D) showLogin(e.message);
+    else toast('⚠️ ' + e.message);
+  }
+}
+$('refresh').addEventListener('click', () => load(false));
+$('logout').addEventListener('click', () => { setToken(''); showLogin('Вы вышли с сайта.'); });
+setInterval(() => { if (!document.hidden && getToken() && D && !window.DEMO_DATA) load(true); }, 90000);
+
+/* ---------- старт ---------- */
+(function start() {
+  if (window.DEMO_DATA) {
+    D = JSON.parse(JSON.stringify(window.DEMO_DATA));
+    $('whoName').textContent = 'Окил · админ'; $('ava').textContent = 'О';
+    $('foot').textContent = 'Демо-режим: данные показаны для примера, в таблицу ничего не записывается.';
+    const p = location.hash.slice(1); if (PAGES.some(x => x[0] === p)) page = p;
+    render(); return;
+  }
+  if (getToken()) load(true); else showLogin('');
+})();
+</script>
+</body>
+</html>
