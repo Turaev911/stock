@@ -10,13 +10,13 @@
     --bg: var(--tg-theme-bg-color, #ffffff);
     --text: var(--tg-theme-text-color, #111111);
     --hint: var(--tg-theme-hint-color, #8a8a8e);
-    --link: var(--tg-theme-link-color, #2481cc);
-    --btn: var(--tg-theme-button-color, #2481cc);
-    --btn-text: var(--tg-theme-button-text-color, #ffffff);
+    --link: #1769d1;
+    --btn: #1769d1;
+    --btn-text: #ffffff;
     --sec: var(--tg-theme-secondary-bg-color, #f1f1f4);
     --card: var(--tg-theme-section-bg-color, var(--bg));
     --sep: rgba(127,127,127,.18);
-    --ok: #1f9d55; --warn: #e08a00; --bad: #d64545;
+    --ok: #1769d1; --warn: #e08a00; --bad: #d64545;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html, body { margin: 0; background: var(--sec); color: var(--text);
@@ -55,7 +55,7 @@
   .row .n { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; word-break: break-word; }
   .row .m { color: var(--hint); font-size: 12px; margin-top: 2px; }
   .qty { flex: none; min-width: 44px; text-align: center; padding: 4px 8px; border-radius: 8px; font-weight: 600; font-size: 14px;
-    background: rgba(31,157,85,.14); color: var(--ok); }
+    background: rgba(43,140,255,.14); color: var(--ok); }
   .qty.low { background: rgba(224,138,0,.15); color: var(--warn); }
   .qty.zero { background: rgba(127,127,127,.15); color: var(--hint); }
   .more { text-align: center; color: var(--hint); font-size: 13px; padding: 12px; }
@@ -132,7 +132,7 @@
   .mini b { min-width: 26px; text-align: center; }
   .st { flex: none; font-size: 12px; padding: 4px 8px; border-radius: 8px; font-weight: 600; }
   .st.built { background: rgba(224,138,0,.15); color: var(--warn); }
-  .st.sold { background: rgba(31,157,85,.14); color: var(--ok); }
+  .st.sold { background: rgba(43,140,255,.14); color: var(--ok); }
   .row.off { opacity: .45; }
 
   /* Компьютер (мышь): видимая тонкая полоса прокрутки у вкладок и кнопок листов, курсор-«рука» для перетаскивания */
