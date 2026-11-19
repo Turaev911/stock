@@ -226,6 +226,27 @@
   .seg i, .seg i b { border-radius: 999px; }
   #toast { border-radius: 999px; background: rgba(20,30,50,.78); -webkit-backdrop-filter: blur(18px); backdrop-filter: blur(18px); padding: 12px 20px; }
 
+  /* карточка позиции (по клику на строку) */
+  #det { position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 16px;
+    background: rgba(10,30,70,.32); -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); }
+  #det .box { position: relative; width: 100%; max-width: 560px; max-height: 88vh; overflow-y: auto; margin: 0; animation: in .3s cubic-bezier(.2,.8,.2,1) both; }
+  #toast { z-index: 60; }
+  #det .box { background: rgba(246,250,255,.96); }
+  #det .box:hover { transform: none; }
+  #det .x { position: absolute; top: 12px; right: 12px; width: 34px; height: 34px; border-radius: 50%; background: rgba(12,35,71,.08); font-size: 15px; }
+  #det .dt { font-size: 19px; font-weight: 700; letter-spacing: -.2px; white-space: pre-line; word-break: break-word; padding-right: 36px; margin-bottom: 4px; user-select: text; }
+  #det .dq { margin: 6px 0; } #det .big.low { color: var(--warn); } #det .big.zero { color: var(--hint); }
+  #det h4 { margin: 16px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--hint); }
+  #det .conf { white-space: pre-line; font-size: 14px; user-select: text; }
+  #det .part span:last-child { user-select: text; }
+  .it.rw { cursor: pointer; }
+  .it.rw:hover { background: rgba(255,255,255,.6); }
+  .cpy { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: var(--hint); background: transparent; transition: background .2s, color .2s, transform .15s; }
+  .cpy svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+  .cpy:hover { background: rgba(10,122,255,.12); color: var(--accent); }
+  .cpy:active { transform: scale(.9); }
+  .it.rw .n { user-select: text; -webkit-user-select: text; }
+
   @media (max-width: 760px) {
     nav.side { border-radius: 999px; height: 66px; left: 16px; right: 16px; bottom: 14px; }
     .top h1 { font-size: 28px; }
@@ -249,6 +270,7 @@
     <div id="toast" class="hidden"></div>
   </main>
 </div>
+<div id="det" class="hidden"></div>
 
 <script>
 'use strict';
@@ -308,6 +330,7 @@ const ICONS = {
 };
 const PAGES = [['home', 'Обзор', 'home'], ['stock', 'Склад', 'box'], ['low', 'Заканчивается', 'alert'], ['builds', 'Сборки', 'tools'], ['sales', 'Продажи', 'chart']];
 let page = 'home', cat = -1, query = '', lastPage = '';
+let showZero = false, limit = 150;   // показывать и позиции с нулём; сколько строк показано сейчас
 function renderNav() {
   const lowN = X.low.length;
   $('nav').innerHTML = '<div class="logo">//</div>' + PAGES.map(([k, l, ic]) =>
@@ -316,19 +339,63 @@ function renderNav() {
 }
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-p]'); if (b) { go(b.dataset.p); return; }
-  const c = e.target.closest('[data-cat]'); if (c) { cat = Number(c.dataset.cat); render(); return; }
+  const c = e.target.closest('[data-cat]'); if (c) { cat = Number(c.dataset.cat); limit = 150; render(); return; }
+  if (e.target.closest('[data-zero]')) { showZero = !showZero; limit = 150; render(); return; }
+  if (e.target.closest('[data-more]')) { limit += 150; render(); return; }
+  const cp = e.target.closest('[data-copy]'); if (cp) { e.stopPropagation(); copyName(Number(cp.dataset.copy)); return; }
+  const it = e.target.closest('[data-it]'); if (it) { openDet(Number(it.dataset.it)); return; }
+  if (e.target.closest('[data-close]') || e.target.id === 'det') closeDet();
 });
-function go(p) { page = p; query = ''; $('q').value = ''; location.hash = p; render(); window.scrollTo(0, 0); }
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape') closeDet();
+  if (e.key === 'Enter' && e.target.dataset && e.target.dataset.it) openDet(Number(e.target.dataset.it));
+});
+function go(p) { page = p; query = ''; limit = 150; $('q').value = ''; location.hash = p; render(); window.scrollTo(0, 0); }
 window.addEventListener('hashchange', () => { const p = location.hash.slice(1); if (PAGES.some(x => x[0] === p) && p !== page) { page = p; render(); } });
-$('q').addEventListener('input', e => { query = e.target.value; if (query.trim() && page !== 'stock') { page = 'stock'; } render(); });
+$('q').addEventListener('input', e => { query = e.target.value; limit = 150; if (query.trim() && page !== 'stock') { page = 'stock'; } render(); });
 
 /* ---------- страницы ---------- */
-const norm = s => String(s).toLowerCase().replace(/ё/g, 'е').replace(/гб/g, 'gb').replace(/тб/g, 'tb').replace(/\s+/g, ' ').trim();
+const norm = s => String(s).toLowerCase().replace(/ё/g, 'е').replace(/гб/g, 'gb').replace(/тб/g, 'tb').replace(/(\d),(\d)/g, '$1.$2')
+  .replace(/(\d)\s+(gb|tb|mb|w|ghz|mhz|g)\b/g, '$1$2').replace(/[,;()\[\]"'«»]/g, ' ').replace(/\s+/g, ' ').trim();
 const qcls = q => q <= 0 ? 'zero' : q <= (D.lowQty || 2) ? 'low' : '';
 function rowHtml(it) {
-  return '<div class="it"><div class="t"><div class="n">' + esc(oneLine(it.n)) + '</div><div class="m">' + esc(X.sheetName(it)) + ' · ID ' + it.id +
-    (it.s60 ? ' · продано за 60 дн.: ' + it.s60 : '') + '</div></div><span class="q ' + qcls(it.q) + '">' + (it.q > 0 ? it.q : 0) + '</span></div>';
+  const ix = D.items.indexOf(it);
+  return '<div class="it rw" role="button" tabindex="0" data-it="' + ix + '"><div class="t"><div class="n">' + esc(oneLine(it.n)) + '</div><div class="m">' + esc(X.sheetName(it)) + ' · ID ' + it.id +
+    (it.s60 ? ' · продано за 60 дн.: ' + it.s60 : '') + '</div></div><span class="q ' + qcls(it.q) + '">' + (it.q > 0 ? it.q : 0) + '</span>' +
+    '<button class="cpy" data-copy="' + ix + '" title="Скопировать название" aria-label="Скопировать название"><svg viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6.5A2.5 2.5 0 0 1 7.5 4H15"/></svg></button></div>';
 }
+
+/* копирование названия в буфер обмена (с запасным способом для старых браузеров) */
+function copyName(idx) {
+  const it = D.items[idx]; if (!it) return;
+  const text = String(it.n).replace(/\s*\n\s*/g, ' ').trim();
+  const ok = () => toast('📋 Скопировано: ' + (text.length > 60 ? text.slice(0, 57) + '…' : text));
+  const fallback = () => {
+    try { const ta = document.createElement('textarea'); ta.value = text; ta.style.cssText = 'position:fixed;opacity:0;left:-999px'; document.body.appendChild(ta);
+      ta.select(); const r = document.execCommand('copy'); document.body.removeChild(ta); r ? ok() : toast('Не удалось скопировать — выделите название и нажмите Ctrl+C'); }
+    catch (e) { toast('Не удалось скопировать — выделите название и нажмите Ctrl+C'); }
+  };
+  try { if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(ok, fallback); else fallback(); } catch (e) { fallback(); }
+}
+
+/* карточка позиции: все данные из таблицы (все колонки листа, конфигурация, продажи) */
+function openDet(idx) {
+  const it = D.items[idx]; if (!it) return;
+  const sh = D.sheets[it.s], v = it.v || [];
+  const conf = sh.conf >= 0 && v[sh.conf] != null ? String(v[sh.conf]).trim() : '';
+  const rows = (sh.headers || []).map((h, i) => (i < 3 || i === sh.conf || v[i] === '' || v[i] == null) ? '' :
+    '<div class="part"><span>' + esc(h || ('колонка ' + (i + 1))) + '</span><span>' + esc(v[i]) + '</span></div>').join('');
+  $('det').innerHTML = '<div class="card box"><button class="x" data-close aria-label="Закрыть">✕</button>' +
+    '<div class="dt">' + esc(it.n) + '</div><div class="sub" style="margin-bottom:12px">' + esc(sh.name.trim()) + ' · ID ' + it.id + '</div>' +
+    '<div class="dq"><span class="big ' + qcls(it.q) + '"><span>' + (it.q > 0 ? it.q : 0) + '</span><small>шт. ' + (it.q > 0 ? 'в наличии' : 'нет в наличии') + '</small></span></div>' +
+    '<div class="sub">Продано за 30 дней: <b>' + it.s30 + '</b> · за 60 дней: <b>' + it.s60 + '</b></div>' +
+    (conf ? '<h4>Конфигурация</h4><div class="conf">' + esc(conf) + '</div>' : '') +
+    (rows ? '<h4>Все данные из таблицы</h4>' + rows : '') +
+    '<button class="chip" id="cp" style="margin-top:14px">📋 Скопировать название</button></div>';
+  $('det').classList.remove('hidden');
+  $('cp').addEventListener('click', () => copyName(idx));
+}
+function closeDet() { $('det').classList.add('hidden'); }
 const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 function todayIdx() { return (new Date().getDay() + 6) % 7; }
 
@@ -376,12 +443,24 @@ function homeHtml() {
 function stockHtml() {
   const names = D.sheets.map(s => s.name.trim());
   const tokens = norm(query).split(' ').filter(Boolean);
-  let items = D.items.filter(i => i.q > 0 && (cat < 0 || i.s === cat) &&
-    tokens.every(t => norm(names[i.s] + ' ' + (i.v || []).join(' ') + ' ' + i.n).indexOf(t) >= 0));
-  const chips = '<button class="chip' + (cat < 0 ? ' on' : '') + '" data-cat="-1">Все <small>' + D.items.filter(i => i.q > 0).length + '</small></button>' +
-    D.sheets.map((s, k) => { const n = D.items.filter(i => i.s === k && i.q > 0).length; return n ? '<button class="chip' + (cat === k ? ' on' : '') + '" data-cat="' + k + '">' + esc(s.name.trim()) + ' <small>' + n + '</small></button>' : ''; }).join('');
-  return '<div class="chips">' + chips + '</div><div class="card"><h3>' + (query.trim() ? 'Найдено: ' + items.length : 'На складе: ' + items.length + ' поз.') + '</h3>' +
-    (items.length ? '<div class="list">' + items.slice(0, 150).map(rowHtml).join('') + '</div>' : '<div class="empty">Ничего не найдено</div>') + '</div>';
+  const searching = tokens.length > 0;
+  const zeros = showZero || searching;   // при поиске ищем по ВСЕЙ базе, в том числе по тому, чего сейчас нет на складе
+  // Поиск как у бота: все слова запроса должны найтись; P/N находится и без дефисов, точек, пробелов
+  const hayOf = i => i._h || (i._h = norm(names[i.s] + ' ' + (i.v || []).join(' ') + ' ' + i.n));
+  const squash = s => s.replace(/[\s\-\/.]/g, '');
+  const hit = i => { const h = hayOf(i); const hc = i._hc || (i._hc = squash(h));
+    return tokens.every(t => { const tc = squash(t); return h.indexOf(t) >= 0 || (tc.length >= 4 && hc.indexOf(tc) >= 0); }); };
+  const base = D.items.filter(i => zeros || i.q > 0);
+  let items = base.filter(i => (cat < 0 || i.s === cat) && (!searching || hit(i)));
+  if (searching) items = items.map((i, k) => [i, k]).sort((a, b) => ((b[0].q > 0) - (a[0].q > 0)) || (a[1] - b[1])).map(x => x[0]);   // сначала то, что в наличии
+  const chips = '<button class="chip' + (cat < 0 ? ' on' : '') + '" data-cat="-1">Все <small>' + base.length + '</small></button>' +
+    D.sheets.map((s, k) => { const n = base.filter(i => i.s === k).length; return n ? '<button class="chip' + (cat === k ? ' on' : '') + '" data-cat="' + k + '">' + esc(s.name.trim()) + ' <small>' + n + '</small></button>' : ''; }).join('') +
+    (searching ? '' : '<button class="chip' + (showZero ? ' on' : '') + '" data-zero="1">С нулём</button>');
+  const shown = items.slice(0, limit), left = items.length - shown.length;
+  return '<div class="chips">' + chips + '</div><div class="card"><h3>' + (searching ? 'Найдено: ' + items.length : (showZero ? 'Вся база: ' : 'На складе: ') + items.length + ' поз.') +
+    (searching ? '<span>включая позиции с нулём</span>' : '') + '</h3>' +
+    (items.length ? '<div class="list">' + shown.map(rowHtml).join('') + '</div>' : '<div class="empty">Ничего не найдено. Попробуйте короче: только модель или P/N.</div>') +
+    (left > 0 ? '<div style="text-align:center;margin-top:14px"><button class="chip" data-more="1">Показать ещё ' + Math.min(150, left) + ' (осталось ' + left + ')</button></div>' : '') + '</div>';
 }
 function lowHtml() {
   const out = D.items.filter(i => i.q <= 0 && i.s60 > 0);
@@ -479,7 +558,22 @@ async function doLogin() {
   } finally { loginBusy = false; }
 }
 
-async function load(silent) {
+// Экран «не удалось загрузить»: вход при этом сохранён, повторный код не нужен
+function showRetry(msg) {
+  D = null; lastPage = '';
+  document.body.classList.add('login');
+  ['refresh', 'logout'].forEach(id => $(id).classList.add('hidden'));
+  $('foot').textContent = '';
+  const v = $('view'); v.classList.remove('noanim');
+  v.innerHTML = '<div class="card lg"><div class="logo2">//</div><h2>Не удалось загрузить склад</h2><p>' + esc(msg || '') + '</p>' +
+    '<p>Вход сохранён — вводить код заново не нужно.</p><button class="btn" id="retry">Повторить</button>' +
+    '<button class="topbtn" id="relog" style="margin-top:10px;width:100%">Войти по коду заново</button></div>';
+  $('retry').addEventListener('click', () => load(false));
+  $('relog').addEventListener('click', () => { setToken(''); showLogin(''); });
+}
+
+async function load(silent, n) {
+  n = n || 0;
   try {
     const j = await api({ action: 'init', web: true, token: getToken() });
     delete j.ok;
@@ -493,12 +587,21 @@ async function load(silent) {
     if (!silent) toast('✅ Данные загружены');
   } catch (e) {
     if (e.code === 'auth') { setToken(''); showLogin(e.message); }
-    else if (!D) showLogin(e.message);
+    else if (!D) {
+      // сбой связи или «холодный старт» Google: вход не сбрасываем — пробуем ещё пару раз, потом даём кнопку «Повторить»
+      if (getToken() && n < 3) setTimeout(() => load(silent, n + 1), 2500);
+      else if (getToken()) showRetry(e.message);
+      else showLogin(e.message);
+    }
     else toast('⚠️ ' + e.message);
   }
 }
 $('refresh').addEventListener('click', () => load(false));
-$('logout').addEventListener('click', () => { setToken(''); showLogin('Вы вышли с сайта.'); });
+$('logout').addEventListener('click', () => {
+  const t = getToken(); setToken('');
+  if (t) api({ action: 'weblogout', token: t }).catch(() => {});   // и на сервере сессию закрываем
+  showLogin('Вы вышли с сайта.');
+});
 setInterval(() => { if (!document.hidden && getToken() && D && !window.DEMO_DATA) load(true); }, 90000);
 
 /* ---------- старт ---------- */
