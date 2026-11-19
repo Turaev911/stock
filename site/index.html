@@ -240,6 +240,7 @@
   #det .conf { white-space: pre-line; font-size: 14px; user-select: text; }
   #det .part span:last-child { user-select: text; }
   /* операции с остатком и форма нового раздела */
+  #det .pend { margin-top: 8px; font-size: 13px; color: var(--accent); font-weight: 600; }
   #det .opsrow { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 4px; }
   #det .lbl { font-size: 13px; color: var(--hint); margin: 12px 2px 5px; }
   #det .inp { width: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,.85); outline: 0; font: inherit; color: var(--ink); }
@@ -436,18 +437,20 @@ function renderDet() {
     '<div class="dt">' + esc(it.n) + '</div><div class="sub" style="margin-bottom:12px">' + esc(sh.name.trim()) + ' · ID ' + it.id + '</div>' +
     '<div class="dq"><span class="big ' + qcls(it.q) + '"><span>' + (it.q > 0 ? it.q : 0) + '</span><small>шт. ' + (it.q > 0 ? 'в наличии' : 'нет в наличии') + '</small></span></div>' +
     '<div class="sub">Продано за 30 дней: <b>' + it.s30 + '</b> · за 60 дней: <b>' + it.s60 + '</b></div>' +
+    (opBusy ? '<div class="pend">⏳ Записываю в таблицу…</div>' : '') +
     (canEdit() ? '<div class="opsrow">' + Object.keys(OPS).map(c => '<button class="chip' + (c === 'sale' || c === 'in' ? ' on' : '') + '" data-op="' + c + '">' + OPS[c].name + '</button>').join('') + '</div>' : '') +
     (conf ? '<h4>Конфигурация</h4><div class="conf">' + esc(conf) + '</div>' : '') +
     (rows ? '<h4>Все данные из таблицы</h4>' + rows : '') +
     '<button class="chip" id="cp" style="margin-top:14px">📋 Скопировать название</button></div>';
   $('cp').addEventListener('click', () => copyName(idx));
 }
-function closeDet() { $('det').classList.add('hidden'); detKey = null; detMode = ''; opBusy = false; }
+function closeDet() { $('det').classList.add('hidden'); detKey = null; detMode = ''; }
 
 /* ---------- изменение остатка с сайта (тот же путь, что в мини-приложении: проверка, запись в таблицу и «Журнал») ---------- */
 function openOp(code) {
   const it = curItem(); if (!it || !canEdit()) return;
-  detOp = code; detMode = 'op'; opBusy = false;
+  if (opBusy) { toast('Подождите секунду: предыдущая операция ещё записывается.'); return; }
+  detOp = code; detMode = 'op';
   const op = OPS[code];
   $('det').innerHTML = '<div class="card box"><button class="x" data-close aria-label="Закрыть">✕</button>' +
     '<div class="dt">' + op.name + '</div><div class="sub" style="margin-bottom:6px">' + esc(oneLine(it.n)) + '</div>' +
@@ -469,20 +472,27 @@ function updOp() {
     (after < 0 ? '<br><span style="color:var(--bad)">На складе только ' + it.q + ' шт.</span>' : '') : '';
   $('opok').disabled = !ok || after < 0 || opBusy;
 }
+/* Остаток меняется на экране СРАЗУ (не ждём таблицу); если запись не прошла — возвращаем прежнее число и говорим об ошибке. */
 async function doOp() {
   const it = curItem(); if (!it || opBusy || $('opok').disabled) return;
-  const q = Math.floor(Number($('opq').value)), code = detOp;
-  opBusy = true; $('opok').textContent = 'Записываю…'; updOp();
+  const op = OPS[detOp], code = detOp, q = Math.floor(Number($('opq').value)), extra = $('opx').value;
+  const prev = { q: it.q, s30: it.s30, s60: it.s60 };
+  const body = { action: 'op', token: getToken(), sheet: D.sheets[it.s].name, row: it.r, id: it.id, name: it.n, code: code, q: q, extra: extra };
+  opBusy = true;
+  it.q = op.sign === 0 ? q : it.q + op.sign * q;
+  if (code === 'sale') { it.s30 += q; it.s60 += q; }
+  detMode = 'card'; render(); renderDet();
   try {
-    const j = await api({ action: 'op', token: getToken(), sheet: D.sheets[it.s].name, row: it.r, id: it.id, name: it.n, code: code, q: q, extra: $('opx').value });
+    const j = await api(body);
     const cur = curItem() || it;
-    cur.q = j.qty; if (code === 'sale') { cur.s30 += q; cur.s60 += q; }
-    opBusy = false; detMode = 'card'; render(); renderDet(); toast(j.message);
+    cur.q = j.qty;                                    // итог берём из таблицы (если кто-то успел изменить параллельно)
+    opBusy = false; render(); renderDet(); toast(j.message);
   } catch (e) {
-    opBusy = false;
+    const cur = curItem() || it;
+    cur.q = prev.q; cur.s30 = prev.s30; cur.s60 = prev.s60;
+    opBusy = false; render(); renderDet();
     if (e.code === 'auth') { setToken(''); closeDet(); showLogin(e.message); return; }
-    if ($('opok')) { $('opok').textContent = 'Подтвердить'; updOp(); }
-    toast('⚠️ ' + e.message);
+    toast('⚠️ ' + e.message + ' Остаток возвращён.');
   }
 }
 
@@ -639,10 +649,13 @@ const setToken = t => { memToken = t || ''; try { if (t) localStorage.setItem(TO
 let toastT = 0;
 function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), 4000); }
 
-async function api(body) {
+async function api(body, timeoutMs) {
   let res;
-  try { res = await fetch(API_URL + '?api=1', { method: 'POST', body: JSON.stringify(body) }); }
-  catch (e) { throw new Error('Нет связи с таблицей. Проверьте интернет.'); }
+  const ctl = timeoutMs && window.AbortController ? new AbortController() : null;
+  const timer = ctl ? setTimeout(() => ctl.abort(), timeoutMs) : 0;
+  try { res = await fetch(API_URL + '?api=1', { method: 'POST', body: JSON.stringify(body), signal: ctl ? ctl.signal : undefined }); }
+  catch (e) { clearTimeout(timer); throw new Error('Нет связи с таблицей. Проверьте интернет.'); }
+  clearTimeout(timer);
   let j;
   try { j = await res.json(); } catch (e) { throw new Error('Таблица ответила с ошибкой. Попробуйте ещё раз.'); }
   if (!j.ok) { const err = new Error(j.error || 'Ошибка'); err.code = j.code; throw err; }
@@ -726,24 +739,28 @@ $('logout').addEventListener('click', () => {
 });
 setInterval(() => { if (!document.hidden && getToken() && D && !window.DEMO_DATA) load(true); }, 90000);   // полное обновление (журнал, продажи, ручные правки в таблице)
 
-/* ---------- синхронизация: каждые ~6 секунд спрашиваем «что изменилось» (бот, мини-приложение, другой компьютер) ---------- */
-let pollBusy = false;
+/* ---------- синхронизация («длинный опрос»): запрос «что изменилось?» висит на сервере до 20 секунд и отвечает сразу, как только
+   кто-то (бот, мини-приложение, другой компьютер) изменил остаток; потом тут же спрашиваем снова ---------- */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 function applyChanges(list) {
   list.forEach(c => { const it = D.items.find(i => D.sheets[i.s].name.trim() === c.s && i.id === c.i); if (it) it.q = c.q; });
 }
-async function poll() {
-  if (pollBusy || document.hidden || !getToken() || !D || window.DEMO_DATA || opBusy) return;
-  pollBusy = true;
-  try {
-    const j = await api({ action: 'changes', token: getToken(), since: D.rev || 0 });
-    if (j.full) await load(true);                         // изменилось что-то крупное (новый товар, данные, сборка, раздел) — перечитываем всё
-    else if (j.rev !== D.rev) { applyChanges(j.ch); D.rev = j.rev; render(); refreshDet(); }
-  } catch (e) {
-    if (e.code === 'auth') { setToken(''); closeDet(); showLogin(e.message); }
-  } finally { pollBusy = false; }
-}
-setInterval(poll, 6000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+(async function pollLoop() {
+  let fails = 0;
+  for (;;) {
+    if (document.hidden || !getToken() || !D || window.DEMO_DATA || opBusy) { await sleep(1000); continue; }
+    try {
+      const j = await api({ action: 'changes', token: getToken(), since: D.rev == null ? null : D.rev, wait: 20 }, 40000);
+      fails = 0;
+      if (opBusy) continue;                               // пока своя операция записывается — чужие данные не подмешиваем
+      if (j.full) await load(true);                       // изменилось что-то крупное (новый товар, данные, сборка, раздел) — перечитываем всё
+      else if (j.rev !== D.rev) { applyChanges(j.ch); D.rev = j.rev; render(); refreshDet(); }
+    } catch (e) {
+      if (e.code === 'auth') { setToken(''); closeDet(); showLogin(e.message); }
+      fails++; await sleep(Math.min(15000, 1500 * fails));
+    }
+  }
+})();
 
 /* ---------- старт ---------- */
 (function start() {
