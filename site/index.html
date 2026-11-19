@@ -239,6 +239,23 @@
   #det h4 { margin: 16px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--hint); }
   #det .conf { white-space: pre-line; font-size: 14px; user-select: text; }
   #det .part span:last-child { user-select: text; }
+  /* операции с остатком и форма нового раздела */
+  #det .opsrow { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 4px; }
+  #det .lbl { font-size: 13px; color: var(--hint); margin: 12px 2px 5px; }
+  #det .inp { width: 100%; padding: 12px 14px; border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,.85); outline: 0; font: inherit; color: var(--ink); }
+  #det .inp:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(10,122,255,.18); }
+  #det .stepper { display: flex; align-items: center; gap: 10px; }
+  #det .stepper button { flex: none; width: 48px; height: 48px; border-radius: 50%; background: rgba(255,255,255,.85); border: 1px solid var(--line); font-size: 24px; line-height: 1; }
+  #det .stepper input { flex: 1; min-width: 0; height: 48px; text-align: center; font: inherit; font-size: 22px; font-weight: 700; border: 1px solid var(--line); border-radius: 16px; background: rgba(255,255,255,.85); outline: 0; color: var(--ink); }
+  #det .stepper input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(10,122,255,.18); }
+  #det .preview { margin: 14px 2px 2px; min-height: 22px; }
+  #det .btns { display: flex; gap: 10px; margin-top: 16px; }
+  .pbtn, .sbtn { flex: 1; height: 48px; border-radius: 999px; font-weight: 700; font: inherit; font-weight: 700; transition: transform .15s, opacity .2s; }
+  .pbtn { background: var(--accent); color: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,.4), 0 10px 20px -10px rgba(10,122,255,.8); }
+  .sbtn { background: rgba(12,35,71,.07); color: var(--ink); }
+  .pbtn:active, .sbtn:active { transform: scale(.97); }
+  .pbtn:disabled { opacity: .45; cursor: default; }
+  .chip.add { color: var(--accent); font-weight: 600; }
   .it.rw { cursor: pointer; }
   .it.rw:hover { background: rgba(255,255,255,.6); }
   .cpy { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; color: var(--hint); background: transparent; transition: background .2s, color .2s, transform .15s; }
@@ -338,6 +355,13 @@ function renderNav() {
     (k === 'low' && lowN ? '<span class="badge">' + lowN + '</span>' : '') + '</button>').join('') + '<div class="sp"></div>';
 }
 document.addEventListener('click', e => {
+  // окно позиции: операции, новый раздел
+  const opb = e.target.closest('[data-op]'); if (opb) { openOp(opb.dataset.op); return; }
+  const stp = e.target.closest('[data-step]'); if (stp) { const i = $('opq'); i.value = Math.max(0, (Math.floor(Number(i.value)) || 0) + Number(stp.dataset.step)); updOp(); return; }
+  if (e.target.closest('[data-opback]')) { detMode = 'card'; renderDet(); return; }
+  if (e.target.closest('#opok')) { doOp(); return; }
+  if (e.target.closest('[data-newcat]')) { openNewCat(); return; }
+  if (e.target.closest('#ncok')) { doNewCat(); return; }
   const b = e.target.closest('[data-p]'); if (b) { go(b.dataset.p); return; }
   const c = e.target.closest('[data-cat]'); if (c) { cat = Number(c.dataset.cat); limit = 150; render(); return; }
   if (e.target.closest('[data-zero]')) { showZero = !showZero; limit = 150; render(); return; }
@@ -379,8 +403,31 @@ function copyName(idx) {
 }
 
 /* карточка позиции: все данные из таблицы (все колонки листа, конфигурация, продажи) */
+const OPS = {
+  sale: { name: 'Продажа', sign: -1, extra: 'Клиент (необязательно)' },
+  in:   { name: 'Приход',  sign: 1,  extra: 'Поставщик (необязательно)' },
+  ret:  { name: 'Возврат', sign: 1,  extra: 'От кого (необязательно)' },
+  wo:   { name: 'Списание', sign: -1, extra: 'Причина (необязательно)' },
+  cnt:  { name: 'Пересчёт', sign: 0, extra: 'Комментарий (необязательно)' },
+};
+const canEdit = () => D && D.me.role !== 'просмотр';
+const isAdmin = () => D && D.me.role === 'админ';
+let detKey = null, detMode = '', detOp = '', opBusy = false;   // какая позиция открыта (лист+ID), что в окне: card / op / newcat
+const curItem = () => detKey && D.items.find(i => D.sheets[i.s].name.trim() === detKey.n && i.id === detKey.id);
+
 function openDet(idx) {
   const it = D.items[idx]; if (!it) return;
+  detKey = { n: D.sheets[it.s].name.trim(), id: it.id }; detMode = 'card';
+  renderDet(); $('det').classList.remove('hidden');
+}
+/* перерисовать окно открытой позиции (после изменения остатка здесь или на другом устройстве) */
+function refreshDet() {
+  if (detMode === 'card') renderDet();
+  else if (detMode === 'op') { if (!curItem()) closeDet(); else updOp(); }
+}
+function renderDet() {
+  const it = curItem(); if (!it) { closeDet(); return; }
+  const idx = D.items.indexOf(it);
   const sh = D.sheets[it.s], v = it.v || [];
   const conf = sh.conf >= 0 && v[sh.conf] != null ? String(v[sh.conf]).trim() : '';
   const rows = (sh.headers || []).map((h, i) => (i < 3 || i === sh.conf || v[i] === '' || v[i] == null) ? '' :
@@ -389,13 +436,85 @@ function openDet(idx) {
     '<div class="dt">' + esc(it.n) + '</div><div class="sub" style="margin-bottom:12px">' + esc(sh.name.trim()) + ' · ID ' + it.id + '</div>' +
     '<div class="dq"><span class="big ' + qcls(it.q) + '"><span>' + (it.q > 0 ? it.q : 0) + '</span><small>шт. ' + (it.q > 0 ? 'в наличии' : 'нет в наличии') + '</small></span></div>' +
     '<div class="sub">Продано за 30 дней: <b>' + it.s30 + '</b> · за 60 дней: <b>' + it.s60 + '</b></div>' +
+    (canEdit() ? '<div class="opsrow">' + Object.keys(OPS).map(c => '<button class="chip' + (c === 'sale' || c === 'in' ? ' on' : '') + '" data-op="' + c + '">' + OPS[c].name + '</button>').join('') + '</div>' : '') +
     (conf ? '<h4>Конфигурация</h4><div class="conf">' + esc(conf) + '</div>' : '') +
     (rows ? '<h4>Все данные из таблицы</h4>' + rows : '') +
     '<button class="chip" id="cp" style="margin-top:14px">📋 Скопировать название</button></div>';
-  $('det').classList.remove('hidden');
   $('cp').addEventListener('click', () => copyName(idx));
 }
-function closeDet() { $('det').classList.add('hidden'); }
+function closeDet() { $('det').classList.add('hidden'); detKey = null; detMode = ''; opBusy = false; }
+
+/* ---------- изменение остатка с сайта (тот же путь, что в мини-приложении: проверка, запись в таблицу и «Журнал») ---------- */
+function openOp(code) {
+  const it = curItem(); if (!it || !canEdit()) return;
+  detOp = code; detMode = 'op'; opBusy = false;
+  const op = OPS[code];
+  $('det').innerHTML = '<div class="card box"><button class="x" data-close aria-label="Закрыть">✕</button>' +
+    '<div class="dt">' + op.name + '</div><div class="sub" style="margin-bottom:6px">' + esc(oneLine(it.n)) + '</div>' +
+    '<div class="lbl">' + (code === 'cnt' ? 'Сколько штук на самом деле?' : 'Сколько штук?') + '</div>' +
+    '<div class="stepper"><button data-step="-1" aria-label="Меньше">−</button><input id="opq" type="number" inputmode="numeric" min="0" value="' + (code === 'cnt' ? Math.max(0, it.q) : 1) + '"><button data-step="1" aria-label="Больше">+</button></div>' +
+    '<div class="lbl">' + op.extra + '</div><input id="opx" class="inp" maxlength="200" autocomplete="off">' +
+    '<div class="preview" id="opp"></div>' +
+    '<div class="btns"><button class="sbtn" data-opback>Назад</button><button class="pbtn" id="opok">Подтвердить</button></div></div>';
+  $('opq').addEventListener('input', updOp);
+  $('opq').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doOp(); } });
+  $('opx').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doOp(); } });
+  updOp(); $('opq').focus(); $('opq').select();
+}
+function updOp() {
+  const it = curItem(); if (!it || !$('opq')) return;
+  const op = OPS[detOp], q = Math.floor(Number($('opq').value));
+  const ok = q >= 0 && (detOp === 'cnt' || q > 0), after = op.sign === 0 ? q : it.q + op.sign * q;
+  $('opp').innerHTML = ok ? 'Остаток: <b>' + it.q + '</b> → <b' + (after < 0 ? ' style="color:var(--bad)"' : '') + '>' + after + '</b> шт.' +
+    (after < 0 ? '<br><span style="color:var(--bad)">На складе только ' + it.q + ' шт.</span>' : '') : '';
+  $('opok').disabled = !ok || after < 0 || opBusy;
+}
+async function doOp() {
+  const it = curItem(); if (!it || opBusy || $('opok').disabled) return;
+  const q = Math.floor(Number($('opq').value)), code = detOp;
+  opBusy = true; $('opok').textContent = 'Записываю…'; updOp();
+  try {
+    const j = await api({ action: 'op', token: getToken(), sheet: D.sheets[it.s].name, row: it.r, id: it.id, name: it.n, code: code, q: q, extra: $('opx').value });
+    const cur = curItem() || it;
+    cur.q = j.qty; if (code === 'sale') { cur.s30 += q; cur.s60 += q; }
+    opBusy = false; detMode = 'card'; render(); renderDet(); toast(j.message);
+  } catch (e) {
+    opBusy = false;
+    if (e.code === 'auth') { setToken(''); closeDet(); showLogin(e.message); return; }
+    if ($('opok')) { $('opok').textContent = 'Подтвердить'; updOp(); }
+    toast('⚠️ ' + e.message);
+  }
+}
+
+/* ---------- новый раздел (новый лист в таблице) — только администратор ---------- */
+function openNewCat() {
+  if (!isAdmin()) return;
+  detKey = null; detMode = 'newcat';
+  $('det').innerHTML = '<div class="card box"><button class="x" data-close aria-label="Закрыть">✕</button>' +
+    '<div class="dt">Новый раздел</div><div class="sub" style="margin-bottom:6px">Это новый лист в таблице — например, «AMD CPU». Товары в него добавляются как обычно.</div>' +
+    '<div class="lbl">Название (до 30 символов)</div><input id="ncn" class="inp" maxlength="30" autocomplete="off" placeholder="AMD CPU">' +
+    '<div class="lbl">Колонки</div><select id="nct" class="inp"><option value="">Стандартные (BRAND, MODEL, P/N, SPECS, CONDITION, PRICE, NOTES)</option>' +
+    D.sheets.map(s => '<option value="' + esc(s.name) + '">Как у листа «' + esc(s.name.trim()) + '»</option>').join('') + '</select>' +
+    '<div class="btns"><button class="sbtn" data-close>Отмена</button><button class="pbtn" id="ncok">Создать раздел</button></div></div>';
+  $('ncn').addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); doNewCat(); } });
+  $('det').classList.remove('hidden'); $('ncn').focus();
+}
+async function doNewCat() {
+  const name = $('ncn').value.trim(), tpl = $('nct').value;
+  if (!name) { toast('Напишите название раздела.'); return; }
+  const b = $('ncok'); if (b.disabled) return;
+  b.disabled = true; b.textContent = 'Создаю…';
+  try {
+    const j = await api({ action: 'newsheet', token: getToken(), name: name, tpl: tpl });
+    closeDet(); toast(j.message);
+    await load(true);
+    const k = D.sheets.findIndex(s => s.name.trim().toLowerCase() === name.replace(/\s+/g, ' ').toLowerCase());
+    if (k >= 0) { page = 'stock'; cat = k; limit = 150; render(); }
+  } catch (e) {
+    if (e.code === 'auth') { setToken(''); closeDet(); showLogin(e.message); return; }
+    b.disabled = false; b.textContent = 'Создать раздел'; toast('⚠️ ' + e.message);
+  }
+}
 const DAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 function todayIdx() { return (new Date().getDay() + 6) % 7; }
 
@@ -454,12 +573,15 @@ function stockHtml() {
   let items = base.filter(i => (cat < 0 || i.s === cat) && (!searching || hit(i)));
   if (searching) items = items.map((i, k) => [i, k]).sort((a, b) => ((b[0].q > 0) - (a[0].q > 0)) || (a[1] - b[1])).map(x => x[0]);   // сначала то, что в наличии
   const chips = '<button class="chip' + (cat < 0 ? ' on' : '') + '" data-cat="-1">Все <small>' + base.length + '</small></button>' +
-    D.sheets.map((s, k) => { const n = base.filter(i => i.s === k).length; return n ? '<button class="chip' + (cat === k ? ' on' : '') + '" data-cat="' + k + '">' + esc(s.name.trim()) + ' <small>' + n + '</small></button>' : ''; }).join('') +
-    (searching ? '' : '<button class="chip' + (showZero ? ' on' : '') + '" data-zero="1">С нулём</button>');
+    D.sheets.map((s, k) => { const n = base.filter(i => i.s === k).length; return '<button class="chip' + (cat === k ? ' on' : '') + '" data-cat="' + k + '">' + esc(s.name.trim()) + ' <small>' + n + '</small></button>'; }).join('') +
+    (searching ? '' : '<button class="chip' + (showZero ? ' on' : '') + '" data-zero="1">С нулём</button>') +
+    (isAdmin() ? '<button class="chip add" data-newcat="1">＋ Новый раздел</button>' : '');
   const shown = items.slice(0, limit), left = items.length - shown.length;
   return '<div class="chips">' + chips + '</div><div class="card"><h3>' + (searching ? 'Найдено: ' + items.length : (showZero ? 'Вся база: ' : 'На складе: ') + items.length + ' поз.') +
     (searching ? '<span>включая позиции с нулём</span>' : '') + '</h3>' +
-    (items.length ? '<div class="list">' + shown.map(rowHtml).join('') + '</div>' : '<div class="empty">Ничего не найдено. Попробуйте короче: только модель или P/N.</div>') +
+    (items.length ? '<div class="list">' + shown.map(rowHtml).join('') + '</div>' :
+      (!searching && cat >= 0 && !D.items.some(i => i.s === cat) ? '<div class="empty">В разделе «' + esc(D.sheets[cat].name.trim()) + '» пока нет товаров.<br>Добавьте первый через бота или мини-приложение (➕ Новый товар).</div>'
+        : '<div class="empty">Ничего не найдено. Попробуйте короче: только модель или P/N.</div>')) +
     (left > 0 ? '<div style="text-align:center;margin-top:14px"><button class="chip" data-more="1">Показать ещё ' + Math.min(150, left) + ' (осталось ' + left + ')</button></div>' : '') + '</div>';
 }
 function lowHtml() {
@@ -581,9 +703,9 @@ async function load(silent, n) {
     document.body.classList.remove('login');
     ['refresh', 'logout'].forEach(id => $(id).classList.remove('hidden'));
     $('whoName').textContent = D.me.name + ' · ' + D.me.role; $('ava').textContent = (D.me.name || '?').trim().charAt(0).toUpperCase();
-    const t = new Date(); $('foot').textContent = 'Данные из таблицы · обновлено ' + t.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) + ' · с сайта можно только смотреть';
+    const t = new Date(); $('foot').textContent = 'Данные из таблицы · обновлено ' + t.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }) + ' · изменения из бота и мини-приложения появляются здесь сами через несколько секунд';
     if (lastPage === '') { const p = location.hash.slice(1); if (PAGES.some(x => x[0] === p)) page = p; }
-    render();
+    render(); refreshDet();
     if (!silent) toast('✅ Данные загружены');
   } catch (e) {
     if (e.code === 'auth') { setToken(''); showLogin(e.message); }
@@ -602,7 +724,26 @@ $('logout').addEventListener('click', () => {
   if (t) api({ action: 'weblogout', token: t }).catch(() => {});   // и на сервере сессию закрываем
   showLogin('Вы вышли с сайта.');
 });
-setInterval(() => { if (!document.hidden && getToken() && D && !window.DEMO_DATA) load(true); }, 90000);
+setInterval(() => { if (!document.hidden && getToken() && D && !window.DEMO_DATA) load(true); }, 90000);   // полное обновление (журнал, продажи, ручные правки в таблице)
+
+/* ---------- синхронизация: каждые ~6 секунд спрашиваем «что изменилось» (бот, мини-приложение, другой компьютер) ---------- */
+let pollBusy = false;
+function applyChanges(list) {
+  list.forEach(c => { const it = D.items.find(i => D.sheets[i.s].name.trim() === c.s && i.id === c.i); if (it) it.q = c.q; });
+}
+async function poll() {
+  if (pollBusy || document.hidden || !getToken() || !D || window.DEMO_DATA || opBusy) return;
+  pollBusy = true;
+  try {
+    const j = await api({ action: 'changes', token: getToken(), since: D.rev || 0 });
+    if (j.full) await load(true);                         // изменилось что-то крупное (новый товар, данные, сборка, раздел) — перечитываем всё
+    else if (j.rev !== D.rev) { applyChanges(j.ch); D.rev = j.rev; render(); refreshDet(); }
+  } catch (e) {
+    if (e.code === 'auth') { setToken(''); closeDet(); showLogin(e.message); }
+  } finally { pollBusy = false; }
+}
+setInterval(poll, 6000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
 
 /* ---------- старт ---------- */
 (function start() {
