@@ -352,6 +352,27 @@ async function refresh(silent) {
   }
 }
 
+/* ---------- синхронизация: каждые ~7 секунд спрашиваем «что изменилось» (сайт, бот, другой телефон) ---------- */
+let pollBusy = false;
+async function poll() {
+  if (pollBusy || syncing || document.hidden || !D || DEMO) return;
+  pollBusy = true;
+  try {
+    const j = await api('changes', { since: D.rev || 0 }, 12000);
+    if (j.full) await refresh(true);                     // новый товар, данные, сборка, раздел — перечитываем всё
+    else if (j.rev !== D.rev) {
+      j.ch.forEach(c => { const it = D.items.find(x => D.sheets[x.s].name.trim() === c.s && x.id === c.i); if (it) it.q = c.q; });
+      D.rev = j.rev;
+      if (!(view === 'new' || (view === 'builds' && bview === 'new'))) renderMain();   // форму «Новый» не трогаем — пропадёт набранный текст
+      if (cur) renderItem();
+      saveCache();
+    }
+  } catch (e) { /* молча: следующая проверка через несколько секунд */ }
+  finally { pollBusy = false; }
+}
+setInterval(poll, 7000);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+
 function fatal(msg) {
   $('hdr').classList.add('hidden'); closePage(); closeSheet();
   $('main').innerHTML = '<div class="fatal"><div style="font-size:42px">📦</div><h2>Склад</h2><p>' + esc(msg) + '</p></div>';
@@ -631,7 +652,8 @@ function newHtml() {
     '<div class="row2"><input class="inp" id="aiText" placeholder="P/N или модель, например P00924-B21" autocomplete="off" enterkeyhint="go">' +
     '<button class="btn go" id="aiGo" title="Распознать">🔎</button></div><div id="aiOut"></div></div>' +
     '<div class="note">Или заполните вручную. Сначала проверьте поиском, что товара точно нет в таблице.</div><h3>Лист</h3><div class="chips">' +
-    D.sheets.map((sh, i) => '<button class="chip' + (newSheet === i ? ' on' : '') + '" data-newsheet="' + i + '">' + esc(sh.name.trim()) + '</button>').join('') + '</div>';
+    D.sheets.map((sh, i) => '<button class="chip' + (newSheet === i ? ' on' : '') + '" data-newsheet="' + i + '">' + esc(sh.name.trim()) + '</button>').join('') +
+    (D.me.role === 'админ' ? '<button class="chip" data-newcat="1" style="color:var(--link);font-weight:600">＋ Новый раздел</button>' : '') + '</div>';
   if (newSheet < 0) return h + '<div class="empty">Выберите лист, куда добавить товар</div>';
   const sh = D.sheets[newSheet];
   const dr = draft && draft.si === newSheet ? draft : null;
@@ -658,6 +680,7 @@ function newHtml() {
 }
 document.addEventListener('click', e => {
   const b = e.target.closest('[data-newsheet]'); if (b) { newSheet = Number(b.dataset.newsheet); renderMain(); return; }
+  if (e.target.closest('[data-newcat]')) { openNewCat(); return; }
   if (e.target.id === 'nok') confirmNew();
   if (e.target.closest('[data-airetry]')) { closeSheet(); if (window.__aiRetry) window.__aiRetry(); return; }
   if (e.target.closest('#aiPick')) { const f = $('aiFile'); if (f) f.click(); return; }
@@ -672,6 +695,24 @@ document.addEventListener('click', e => {
 });
 document.addEventListener('keydown', e => { if (e.target.id === 'aiText' && e.key === 'Enter') { e.preventDefault(); const t = e.target.value.trim(); if (t) aiRun(t, null); } });
 document.addEventListener('change', e => { if (e.target.id === 'aiFile' && e.target.files && e.target.files[0]) aiRun($('aiText').value.trim(), e.target.files[0]); });
+
+/* ---------- новый раздел (новый лист в таблице) — только администратор ---------- */
+function openNewCat() {
+  openSheet('<h2>📂 Новый раздел</h2><div class="sub">Это новый лист в таблице, например «AMD CPU». Товары в него добавляются как обычно.</div>' +
+    '<div class="lbl">Название (до 30 символов)</div><input id="ncn" class="inp" maxlength="30" autocomplete="off" placeholder="AMD CPU">' +
+    '<div class="lbl">Колонки</div><select id="nct" class="inp"><option value="">Стандартные (BRAND, MODEL, P/N, SPECS, CONDITION, PRICE, NOTES)</option>' +
+    D.sheets.map(s => '<option value="' + esc(s.name) + '">Как у листа «' + esc(s.name.trim()) + '»</option>').join('') + '</select>' +
+    '<div class="btns"><button class="btn sec" data-cancel>Отмена</button><button class="btn" id="ncok">Создать раздел</button></div>');
+  $('ncok').addEventListener('click', () => busy($('ncok'), async () => {
+    const name = $('ncn').value.trim();
+    if (!name) { toast('Напишите название раздела.'); $('ncok').disabled = false; $('ncok').textContent = 'Создать раздел'; return; }
+    const j = await api('newsheet', { name: name, tpl: $('nct').value });
+    closeSheet(); haptic('success'); toast(j.message, 6000);
+    await refresh(true);
+    const k = D.sheets.findIndex(s => s.name.trim().toLowerCase() === name.replace(/\s+/g, ' ').toLowerCase());
+    if (k >= 0) { newSheet = k; renderMain(); }
+  }));
+}
 
 /* ---------- распознавание по фото / P/N ---------- */
 function readImage(file) {
