@@ -352,26 +352,29 @@ async function refresh(silent) {
   }
 }
 
-/* ---------- синхронизация: каждые ~7 секунд спрашиваем «что изменилось» (сайт, бот, другой телефон) ---------- */
-let pollBusy = false;
-async function poll() {
-  if (pollBusy || syncing || document.hidden || !D || DEMO) return;
-  pollBusy = true;
-  try {
-    const j = await api('changes', { since: D.rev || 0 }, 12000);
-    if (j.full) await refresh(true);                     // новый товар, данные, сборка, раздел — перечитываем всё
-    else if (j.rev !== D.rev) {
-      j.ch.forEach(c => { const it = D.items.find(x => D.sheets[x.s].name.trim() === c.s && x.id === c.i); if (it) it.q = c.q; });
-      D.rev = j.rev;
-      if (!(view === 'new' || (view === 'builds' && bview === 'new'))) renderMain();   // форму «Новый» не трогаем — пропадёт набранный текст
-      if (cur) renderItem();
-      saveCache();
-    }
-  } catch (e) { /* молча: следующая проверка через несколько секунд */ }
-  finally { pollBusy = false; }
-}
-setInterval(poll, 7000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+/* ---------- синхронизация («длинный опрос»): запрос «что изменилось?» висит на сервере до 20 секунд и отвечает сразу, как только
+   кто-то (сайт, бот, другой телефон) изменил остаток; потом тут же спрашиваем снова ---------- */
+let opPending = false;   // своя операция ещё записывается
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+(async function pollLoop() {
+  let fails = 0;
+  for (;;) {
+    if (document.hidden || !D || DEMO || syncing || opPending) { await sleep(1000); continue; }
+    try {
+      const j = await api('changes', { since: D.rev == null ? null : D.rev, wait: 20 }, 40000);
+      fails = 0;
+      if (opPending) continue;                           // пока своя операция записывается — чужие данные не подмешиваем
+      if (j.full) await refresh(true);                   // новый товар, данные, сборка, раздел — перечитываем всё
+      else if (j.rev !== D.rev) {
+        j.ch.forEach(c => { const it = D.items.find(x => D.sheets[x.s].name.trim() === c.s && x.id === c.i); if (it) it.q = c.q; });
+        D.rev = j.rev;
+        if (!(view === 'new' || (view === 'builds' && bview === 'new'))) renderMain();   // форму «Новый» не трогаем — пропадёт набранный текст
+        if (cur) renderItem();
+        saveCache();
+      }
+    } catch (e) { fails++; await sleep(Math.min(15000, 1500 * fails)); }   // нет связи / auth — молча ждём и пробуем снова
+  }
+})();
 
 function fatal(msg) {
   $('hdr').classList.add('hidden'); closePage(); closeSheet();
@@ -620,14 +623,28 @@ function openOp(code) {
     $('opq').value = Math.max(0, (Math.floor(Number($('opq').value)) || 0) + Number(b.dataset.step)); upd();
   }));
   upd();
-  $('opok').addEventListener('click', () => busy($('opok'), async () => {
-    const q = Math.floor(Number($('opq').value));
-    const j = await api('op', { sheet: D.sheets[it.s].name, row: it.r, id: it.id, name: it.n, code: code, q: q, extra: $('opx').value });
+  // Остаток меняется на экране СРАЗУ (не ждём таблицу); если запись не прошла — возвращаем прежнее число и говорим об ошибке.
+  $('opok').addEventListener('click', async () => {
+    if (opPending || $('opok').disabled) return;
+    const q = Math.floor(Number($('opq').value)), extra = $('opx').value;
+    const prev = { q: it.q, s30: it.s30, s60: it.s60 };
+    const body = { sheet: D.sheets[it.s].name, row: it.r, id: it.id, name: it.n, code: code, q: q, extra: extra };
+    opPending = true;
+    it.q = op.sign === 0 ? q : it.q + op.sign * q;
     if (code === 'sale') { it.s30 += q; it.s60 += q; }
-    it.q = j.qty;
-    closeSheet(); renderItem(); renderMain(); saveCache();
-    haptic('success'); toast(j.message);
-  }));
+    closeSheet(); renderItem(); renderMain(); toast('⏳ Записываю…', 1500);
+    try {
+      const j = await api('op', body);
+      it.q = j.qty;                                   // итог берём из таблицы
+      opPending = false; renderItem(); renderMain(); saveCache();
+      haptic('success'); toast(j.message);
+    } catch (e) {
+      it.q = prev.q; it.s30 = prev.s30; it.s60 = prev.s60;
+      opPending = false; renderItem(); renderMain();
+      haptic('error'); toast('⚠️ ' + e.message + ' Остаток возвращён.', 6000);
+      if (/изменилась|не найден/i.test(e.message)) refresh(true);
+    }
+  });
 }
 
 /* правка одной колонки */
