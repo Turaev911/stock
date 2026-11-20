@@ -379,7 +379,7 @@ document.addEventListener('click', e => {
   if (e.target.closest('#niok')) { doNewItem(); return; }
   if (e.target.closest('#ncok')) { doNewCat(); return; }
   const ivo = e.target.closest('[data-ivok]'); if (ivo) { e.stopPropagation(); invOk(Number(ivo.dataset.ivok)); return; }
-  const ivc = e.target.closest('[data-inv]'); if (ivc) { invAsk(ivc.dataset.inv); return; }
+  const ivc = e.target.closest('[data-inv]'); if (ivc) { invAsk(ivc.dataset.inv, ivc.dataset.sheet || ''); return; }
   if (e.target.closest('#ivgo')) { invDo(); return; }
   const b = e.target.closest('[data-p]'); if (b) { go(b.dataset.p); return; }
   const c = e.target.closest('[data-cat]'); if (c) { cat = Number(c.dataset.cat); limit = 150; render(); return; }
@@ -456,7 +456,7 @@ function renderDet() {
     '<div class="dq"><span class="big ' + qcls(it.q) + '"><span>' + (it.q > 0 ? it.q : 0) + '</span><small>шт. ' + (it.q > 0 ? 'в наличии' : 'нет в наличии') + '</small></span></div>' +
     '<div class="sub">Продано за 30 дней: <b>' + it.s30 + '</b> · за 60 дней: <b>' + it.s60 + '</b></div>' +
     (opBusy ? '<div class="pend">⏳ Записываю в таблицу…</div>' : '') +
-    (D.inv ? '<div class="sub" style="margin-top:8px">Инвентаризация: ' + (it.ck ? '<span class="ivtag">✔ проверен</span>' : '<span class="ivtag wait">⏳ ещё не проверен</span>') +
+    (invE(it) ? '<div class="sub" style="margin-top:8px">Инвентаризация: ' + (it.ck ? '<span class="ivtag">✔ проверен</span>' : '<span class="ivtag wait">⏳ ещё не проверен</span>') +
       (!it.ck && canEdit() ? ' <button class="ivok" data-ivok="' + idx + '" style="margin-left:6px">✔ Всё верно, ' + Math.max(0, it.q) + ' шт.</button>' : '') + '</div>' : '') +
     (canEdit() ? '<div class="opsrow">' + Object.keys(OPS).map(c => '<button class="chip' + (c === 'sale' || c === 'in' ? ' on' : '') + '" data-op="' + c + '">' + OPS[c].name + '</button>').join('') + '</div>' : '') +
     (conf ? '<h4>Конфигурация</h4><div class="conf">' + esc(conf) + '</div>' : '') +
@@ -500,7 +500,7 @@ async function doOp() {
   const body = { action: 'op', token: getToken(), sheet: D.sheets[it.s].name, row: it.r, id: it.id, name: it.n, code: code, q: q, extra: extra };
   opBusy = true;
   it.q = op.sign === 0 ? q : it.q + op.sign * q;
-  if (D.inv) it.ck = 1;                               // любая операция во время инвентаризации = товар проверен
+  if (invE(it)) it.ck = 1;                            // любая операция во время инвентаризации ЕГО листа = товар проверен
   if (code === 'sale') { it.s30 += q; it.s60 += q; }
   detMode = 'card'; render(); renderDet();
   try {
@@ -592,8 +592,12 @@ async function doNewCat() {
   }
 }
 /* ---------- инвентаризация: что после её начала никто не трогал (остаток > 0, но ни пересчёта, ни «Всё верно», ни операций) ---------- */
-const invLeft = () => D.items.filter(i => i.q > 0 && !i.ck);
-let invBusy = 0, invCmd = '';
+/* Инвентаризация идёт по ЛИСТАМ: D.inv = { 'SSD': {start, by}, 'HDD': {…} } или { '*': … } (все листы). Товар «под инвентаризацией» только если его лист в этом списке. */
+const invE = it => D.inv ? (D.inv[D.sheets[it.s].name.trim()] || D.inv['*'] || null) : null;
+const invLeft = () => D.items.filter(i => invE(i) && i.q > 0 && !i.ck);
+const invLeftOf = k => invLeft().filter(i => k === '*' || D.sheets[i.s].name.trim() === k);
+const invLbl = k => k === '*' ? 'Все листы' : k;
+let invBusy = 0, invCmd = '', invKey = '';
 const fmtDT = ms => new Date(ms).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
 function invRow(it, ok) {
   const ix = D.items.indexOf(it);
@@ -601,30 +605,34 @@ function invRow(it, ok) {
   return rowHtml(it).replace('<button class="cpy"', b + '<button class="cpy"');
 }
 function invHtml() {
-  const inv = D.inv;
-  if (!inv) {
-    return '<div class="grid"><div class="card c12"><h3>Инвентаризация<span>сейчас не идёт</span></h3>' +
-      '<div class="sub" style="line-height:1.6;max-width:720px">Когда пересчитываете склад, нажмите «Начать». Дальше у каждого найденного товара делайте «Пересчёт» или «✔ Всё верно». ' +
-      'Здесь появится отдельная колонка <b>«Не проверены»</b>: товары, у которых в таблице остаток больше нуля, но после начала их никто не трогал. Скорее всего, их уже нет. ' +
-      'В конце их можно обнулить одной кнопкой: строки не удаляются, в «Журнал» пишется старое количество.</div>' +
-      (isAdmin() ? '<div class="ivbtns"><button class="pbtn" data-inv="start">▶ Начать инвентаризацию</button></div>' : '<div class="sub" style="margin-top:12px">Начать может администратор.</div>') +
-      '</div></div>';
-  }
-  const all = D.items.filter(i => i.q > 0 || i.ck);
-  const left = invLeft(), done = D.items.filter(i => i.ck);
-  const pct = all.length ? Math.round(done.length / all.length * 100) : 100;
-  const inCat = i => cat < 0 || i.s === cat;
-  const chips = '<button class="chip' + (cat < 0 ? ' on' : '') + '" data-cat="-1">Все <small>' + left.length + '</small></button>' +
-    D.sheets.map((s, k) => { const n = left.filter(i => i.s === k).length; return n ? '<button class="chip' + (cat === k ? ' on' : '') + '" data-cat="' + k + '">' + esc(s.name.trim()) + ' <small>' + n + '</small></button>' : ''; }).join('');
-  const L = left.filter(inCat), Dn = done.filter(inCat).slice().reverse();
-  const units = left.reduce((s, i) => s + i.q, 0);
-  return '<div class="grid"><div class="card c12"><h3>Инвентаризация идёт<span>с ' + fmtDT(inv.start) + ' · начал(а): ' + esc(inv.by || '') + '</span></h3>' +
+  const inv = D.inv || {}, keys = Object.keys(inv);
+  const chips = !canEdit() ? '' : (inv['*'] ? '' : D.sheets.map(s => s.name.trim()).filter(n => !inv[n]).map(n => '<button class="chip" data-inv="start" data-sheet="' + esc(n) + '">▶ ' + esc(n) + '</button>').join('') +
+    (keys.length ? '' : '<button class="chip on" data-inv="start" data-sheet="*">▶ Все листы</button>'));
+  const startCard = (inv['*'] ? '' : '<div class="card c12"><h3>' + (keys.length ? 'Начать инвентаризацию ещё одного листа' : 'Инвентаризация<span>сейчас не идёт</span>') + '</h3>' +
+    (keys.length ? '' : '<div class="sub" style="line-height:1.6;max-width:720px">Пересчитываете склад? Выберите <b>один лист</b> (например, SSD) и нажмите на него. Дальше у каждого найденного товара этого листа делайте «Пересчёт» или «✔ Всё верно». ' +
+      'Здесь появится колонка <b>«Не проверены»</b>: товары, у которых в таблице остаток больше нуля, но после начала их никто не трогал. Скорее всего, их уже нет. ' +
+      'В конце их можно обнулить одной кнопкой (админ): строки не удаляются, в «Журнал» пишется старое количество. <b>Остальные листы инвентаризация не затрагивает.</b> Можно вести несколько листов одновременно.</div>') +
+    (canEdit() ? '<div class="sub" style="margin:12px 0 8px">Какой лист пересчитываете?</div><div class="chips" style="margin:0">' + chips + '</div>' : '<div class="sub" style="margin-top:12px">Начать могут админ и редактор.</div>') + '</div>');
+  if (!keys.length) return '<div class="grid">' + startCard + '</div>';
+  const mine = k => D.items.filter(i => invE(i) && (k === '*' || D.sheets[i.s].name.trim() === k));
+  const cards = keys.map(k => {
+    const its = mine(k), all = its.filter(i => i.q > 0 || i.ck), done = its.filter(i => i.ck), left = its.filter(i => i.q > 0 && !i.ck);
+    const pct = all.length ? Math.round(done.length / all.length * 100) : 100, units = left.reduce((s, i) => s + i.q, 0);
+    return '<div class="card ' + (keys.length > 1 ? 'c6' : 'c12') + '"><h3>' + esc(invLbl(k)) + '<span>с ' + fmtDT(inv[k].start) + ' · начал(а): ' + esc(inv[k].by || '') + '</span></h3>' +
       '<div class="ivbar"><b style="width:' + pct + '%"></b></div>' +
       '<div class="sub">Проверено <b>' + done.length + '</b> из <b>' + all.length + '</b> (' + pct + '%) · не проверены: <b class="ivwarn">' + left.length + ' поз., ' + units + ' шт.</b></div>' +
-      (isAdmin() ? '<div class="ivbtns">' + (left.length ? '<button class="sbtn" data-inv="zero">Обнулить непроверенные (' + left.length + ')</button>' : '') +
-        '<button class="pbtn" data-inv="end">Завершить инвентаризацию</button></div>' : '') + '</div>' +
-    '<div class="c12"><div class="chips" style="margin:0">' + chips + '</div></div>' +
-    '<div class="card c6"><h3>⏳ Не проверены<span>' + L.length + ' поз.</span></h3><div class="sub" style="margin-bottom:6px">В таблице есть остаток, но после начала инвентаризации товар никто не трогал.</div><div class="list">' +
+      (canEdit() ? '<div class="ivbtns">' + (isAdmin() && left.length ? '<button class="sbtn" data-inv="zero" data-sheet="' + esc(k) + '">Обнулить непроверенные (' + left.length + ')</button>' : '') +
+        '<button class="pbtn" data-inv="end" data-sheet="' + esc(k) + '">Завершить</button></div>' : '') + '</div>';
+  }).join('');
+  const act = D.items.filter(i => invE(i));
+  const left = invLeft(), done = act.filter(i => i.ck);
+  const inCat = i => cat < 0 || i.s === cat;
+  const chipsF = '<button class="chip' + (cat < 0 ? ' on' : '') + '" data-cat="-1">Все <small>' + left.length + '</small></button>' +
+    D.sheets.map((s, k) => { const n = left.filter(i => i.s === k).length; return n ? '<button class="chip' + (cat === k ? ' on' : '') + '" data-cat="' + k + '">' + esc(s.name.trim()) + ' <small>' + n + '</small></button>' : ''; }).join('');
+  const L = left.filter(inCat), Dn = done.filter(inCat).slice().reverse();
+  return '<div class="grid">' + cards + startCard +
+    '<div class="c12"><div class="chips" style="margin:0">' + chipsF + '</div></div>' +
+    '<div class="card c6"><h3>⏳ Не проверены<span>' + L.length + ' поз.</span></h3><div class="sub" style="margin-bottom:6px">В таблице есть остаток, но после начала инвентаризации листа товар никто не трогал.</div><div class="list">' +
       (L.slice(0, limit).map(i => invRow(i, true)).join('') || '<div class="empty">' + (left.length ? 'В этом разделе всё проверено 🎉' : 'Все товары проверены 🎉') + '</div>') +
       (L.length > limit ? '<div style="text-align:center;margin-top:14px"><button class="chip" data-more="1">Показать ещё (осталось ' + (L.length - limit) + ')</button></div>' : '') + '</div></div>' +
     '<div class="card c6"><h3>✔ Проверены<span>' + Dn.length + ' поз.</span></h3><div class="list">' +
@@ -633,7 +641,7 @@ function invHtml() {
 }
 /* «✔ Всё верно»: отмечаем сразу, запись в «Журнал» идёт в фоне (можно быстро отмечать подряд) */
 async function invOk(idx) {
-  const it = D.items[idx]; if (!it || !D.inv || it.ck || !canEdit()) return;
+  const it = D.items[idx]; if (!it || !invE(it) || it.ck || !canEdit()) return;
   it.ck = 1; invBusy++; render(); refreshDet();
   try {
     const j = await api({ action: 'inv', cmd: 'ok', token: getToken(), sheet: D.sheets[it.s].name, row: it.r, id: it.id, name: it.n });
@@ -645,26 +653,30 @@ async function invOk(idx) {
     toast('⚠️ ' + e.message);
   } finally { invBusy--; if (D) { render(); refreshDet(); } }
 }
-function invAsk(cmd) {
-  if (!isAdmin()) return;
-  const left = invLeft();
+function invAsk(cmd, key) {
+  key = String(key || '');
+  if (cmd === 'zero' ? !isAdmin() : !canEdit()) return;
+  const left = invLeftOf(key);
+  const who = key === '*' ? 'всех листов' : 'листа «' + esc(key) + '»';
   let title, text, btn;
   if (cmd === 'start') {
-    title = 'Начать инвентаризацию?';
-    text = 'С этой минуты всё, что вы пересчитаете или отметите «✔ Всё верно», считается проверенным. Остальное попадёт в колонку «Не проверены».';
+    title = 'Начать инвентаризацию ' + who + '?';
+    text = key === '*'
+      ? 'Под инвентаризацию попадут ВСЕ листы сразу. С этой минуты всё, что вы пересчитаете или отметите «✔ Всё верно», считается проверенным, остальное попадёт в «Не проверены». Лучше вести по одному листу, чтобы не путаться.'
+      : 'С этой минуты всё, что вы пересчитаете или отметите «✔ Всё верно» на листе «' + esc(key) + '», считается проверенным. Остальные товары этого листа попадут в колонку «Не проверены». <b>Другие листы не затрагиваются.</b>';
     btn = 'Начать';
   } else if (cmd === 'zero') {
     if (!left.length) return;
     title = 'Обнулить ' + left.length + ' поз.?';
-    text = 'У этих товаров количество станет 0 (' + left.reduce((s, i) => s + i.q, 0) + ' шт. всего). Строки из таблицы не удаляются, в «Журнал» запишется «было → 0», так что вернуть можно.<br><br>' +
+    text = 'У этих товаров (' + who + ') количество станет 0 (' + left.reduce((s, i) => s + i.q, 0) + ' шт. всего). Строки из таблицы не удаляются, в «Журнал» запишется «было → 0», так что вернуть можно.<br><br>' +
       left.slice(0, 8).map(i => '• ' + esc(oneLine(i.n).slice(0, 70)) + ' — ' + i.q + ' шт.').join('<br>') + (left.length > 8 ? '<br>…и ещё ' + (left.length - 8) : '');
     btn = 'Обнулить';
   } else {
-    title = 'Завершить инвентаризацию?';
-    text = left.length ? '<span class="ivwarn">Не проверены ещё ' + left.length + ' поз.</span> Они останутся с прежним количеством. Если их нет на складе, сначала нажмите «Обнулить непроверенные».' : 'Все товары проверены.';
+    title = 'Завершить инвентаризацию ' + who + '?';
+    text = left.length ? '<span class="ivwarn">Не проверены ещё ' + left.length + ' поз.</span> Они останутся с прежним количеством. Если их нет на складе, сначала нажмите «Обнулить непроверенные» (админ). Другие листы не затрагиваются.' : 'Все товары проверены. Другие листы не затрагиваются.';
     btn = 'Завершить';
   }
-  invCmd = cmd; detKey = null; detMode = 'inv';
+  invCmd = cmd; invKey = key; detKey = null; detMode = 'inv';
   $('det').innerHTML = '<div class="card box"><button class="x" data-close aria-label="Закрыть">✕</button><div class="dt">' + title + '</div>' +
     '<div class="sub" style="margin-top:8px;line-height:1.55">' + text + '</div>' +
     '<div class="btns"><button class="sbtn" data-close>Отмена</button><button class="pbtn" id="ivgo">' + btn + '</button></div></div>';
@@ -672,8 +684,8 @@ function invAsk(cmd) {
 }
 async function invDo() {
   const b = $('ivgo'); if (!b || b.disabled) return;
-  const body = { action: 'inv', cmd: invCmd, token: getToken() };
-  if (invCmd === 'zero') body.items = invLeft().map(i => ({ sheet: D.sheets[i.s].name, row: i.r, id: i.id, name: i.n }));
+  const body = { action: 'inv', cmd: invCmd, sheet: invKey, token: getToken() };
+  if (invCmd === 'zero') body.items = invLeftOf(invKey).map(i => ({ sheet: D.sheets[i.s].name, row: i.r, id: i.id, name: i.n }));
   b.disabled = true; b.textContent = 'Записываю…';
   try {
     const j = await api(body);
@@ -904,7 +916,7 @@ setInterval(() => { if (!document.hidden && getToken() && D && !window.DEMO_DATA
    кто-то (бот, мини-приложение, другой компьютер) изменил остаток; потом тут же спрашиваем снова ---------- */
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 function applyChanges(list) {
-  list.forEach(c => { const it = D.items.find(i => D.sheets[i.s].name.trim() === c.s && i.id === c.i); if (it) { it.q = c.q; if (D.inv) it.ck = 1; } });   // во время инвентаризации любое изменение = проверен
+  list.forEach(c => { const it = D.items.find(i => D.sheets[i.s].name.trim() === c.s && i.id === c.i); if (it) { it.q = c.q; if (invE(it)) it.ck = 1; } });   // во время инвентаризации любое изменение = проверен
 }
 (async function pollLoop() {
   let fails = 0;
