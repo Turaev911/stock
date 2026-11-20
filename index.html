@@ -366,7 +366,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       if (opPending) continue;                           // пока своя операция записывается — чужие данные не подмешиваем
       if (j.full) await refresh(true);                   // новый товар, данные, сборка, раздел — перечитываем всё
       else if (j.rev !== D.rev) {
-        j.ch.forEach(c => { const it = D.items.find(x => D.sheets[x.s].name.trim() === c.s && x.id === c.i); if (it) { it.q = c.q; if (D.inv) it.ck = 1; } });
+        j.ch.forEach(c => { const it = D.items.find(x => D.sheets[x.s].name.trim() === c.s && x.id === c.i); if (it) { it.q = c.q; if (invE(it)) it.ck = 1; } });
         D.rev = j.rev;
         if (!(view === 'new' || (view === 'builds' && bview === 'new'))) renderMain();   // форму «Новый» не трогаем — пропадёт набранный текст
         if (cur) renderItem();
@@ -535,8 +535,8 @@ function renderItem() {
     '<div class="card"><div class="kv"><span>В наличии</span><span class="big" style="color:var(--' + (it.q <= 0 ? 'hint' : it.q <= D.lowQty ? 'warn' : 'ok') + ')">' + it.q + ' шт.</span></div>' +
     '<div class="kv"><span>Продано за 30 дней</span><span>' + it.s30 + ' шт.</span></div>' +
     '<div class="kv"><span>Лист · ID</span><span>' + esc(sh.name.trim()) + ' · ' + it.id + '</span></div>' +
-    (D.inv ? '<div class="kv"><span>Инвентаризация</span><span style="color:var(--' + (it.ck ? 'ok' : 'warn') + ')">' + (it.ck ? '✔ проверен' : '⏳ не проверен') + '</span></div>' : '') + '</div>';
-  if (D.inv && !it.ck && canEdit()) h += '<div class="ops"><button class="op wide" data-ivok="1">✔ Всё верно — на месте ' + Math.max(0, it.q) + ' шт.</button></div>';
+    (invE(it) ? '<div class="kv"><span>Инвентаризация</span><span style="color:var(--' + (it.ck ? 'ok' : 'warn') + ')">' + (it.ck ? '✔ проверен' : '⏳ не проверен') + '</span></div>' : '') + '</div>';
+  if (invE(it) && !it.ck && canEdit()) h +='<div class="ops"><button class="op wide" data-ivok="1">✔ Всё верно — на месте ' + Math.max(0, it.q) + ' шт.</button></div>';
   if (canEdit()) {
     h += '<div class="ops">' + ['sale', 'in', 'ret', 'wo'].map(k => '<button class="op" data-op="' + k + '">' + OPS[k].icon + ' ' + OPS[k].name + '</button>').join('') +
       '<button class="op wide" data-op="cnt">' + OPS.cnt.icon + ' ' + OPS.cnt.name + ' (точное количество)</button></div>';
@@ -604,9 +604,11 @@ async function busy(btn, fn) {
     if (/изменилась|не найден/i.test(e.message)) refresh(true); }
 }
 
+/* инвентаризация идёт по листам: D.inv = { 'SSD': {start, by}, … } или { '*': … } (все листы); товар «под инвентаризацией», только если его лист в списке */
+function invE(it) { return D.inv ? (D.inv[D.sheets[it.s].name.trim()] || D.inv['*'] || null) : null; }
 /* инвентаризация: «✔ Всё верно» — товар на месте, количество совпало (отмечается сразу, запись в «Журнал» в фоне) */
 async function invOk() {
-  const it = cur; if (!it || !D.inv || it.ck || opPending) return;
+  const it = cur; if (!it || !invE(it) || it.ck || opPending) return;
   it.ck = 1; opPending = true; renderItem(); renderMain();
   try {
     const j = await api('inv', { cmd: 'ok', sheet: D.sheets[it.s].name, row: it.r, id: it.id, name: it.n });
@@ -651,7 +653,7 @@ function openOp(code) {
     const body = { sheet: D.sheets[it.s].name, row: it.r, id: it.id, name: it.n, code: code, q: q, extra: extra };
     opPending = true;
     it.q = op.sign === 0 ? q : it.q + op.sign * q;
-    if (D.inv) it.ck = 1;
+    if (invE(it)) it.ck = 1;
     if (code === 'sale') { it.s30 += q; it.s60 += q; }
     closeSheet(); renderItem(); renderMain(); toast('⏳ Записываю…', 1500);
     try {
