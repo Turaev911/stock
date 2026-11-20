@@ -366,7 +366,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       if (opPending) continue;                           // пока своя операция записывается — чужие данные не подмешиваем
       if (j.full) await refresh(true);                   // новый товар, данные, сборка, раздел — перечитываем всё
       else if (j.rev !== D.rev) {
-        j.ch.forEach(c => { const it = D.items.find(x => D.sheets[x.s].name.trim() === c.s && x.id === c.i); if (it) it.q = c.q; });
+        j.ch.forEach(c => { const it = D.items.find(x => D.sheets[x.s].name.trim() === c.s && x.id === c.i); if (it) { it.q = c.q; if (D.inv) it.ck = 1; } });
         D.rev = j.rev;
         if (!(view === 'new' || (view === 'builds' && bview === 'new'))) renderMain();   // форму «Новый» не трогаем — пропадёт набранный текст
         if (cur) renderItem();
@@ -534,7 +534,9 @@ function renderItem() {
     (c ? '<button class="copybtn" data-copy="full">📋 Название + конфигурация</button>' : '') + '</div></div>' +
     '<div class="card"><div class="kv"><span>В наличии</span><span class="big" style="color:var(--' + (it.q <= 0 ? 'hint' : it.q <= D.lowQty ? 'warn' : 'ok') + ')">' + it.q + ' шт.</span></div>' +
     '<div class="kv"><span>Продано за 30 дней</span><span>' + it.s30 + ' шт.</span></div>' +
-    '<div class="kv"><span>Лист · ID</span><span>' + esc(sh.name.trim()) + ' · ' + it.id + '</span></div></div>';
+    '<div class="kv"><span>Лист · ID</span><span>' + esc(sh.name.trim()) + ' · ' + it.id + '</span></div>' +
+    (D.inv ? '<div class="kv"><span>Инвентаризация</span><span style="color:var(--' + (it.ck ? 'ok' : 'warn') + ')">' + (it.ck ? '✔ проверен' : '⏳ не проверен') + '</span></div>' : '') + '</div>';
+  if (D.inv && !it.ck && canEdit()) h += '<div class="ops"><button class="op wide" data-ivok="1">✔ Всё верно — на месте ' + Math.max(0, it.q) + ' шт.</button></div>';
   if (canEdit()) {
     h += '<div class="ops">' + ['sale', 'in', 'ret', 'wo'].map(k => '<button class="op" data-op="' + k + '">' + OPS[k].icon + ' ' + OPS[k].name + '</button>').join('') +
       '<button class="op wide" data-op="cnt">' + OPS.cnt.icon + ' ' + OPS.cnt.name + ' (точное количество)</button></div>';
@@ -579,6 +581,7 @@ $('page').addEventListener('click', e => {
   if (e.target.closest('[data-close]')) { closePage(); return; }
   const cp = e.target.closest('[data-copy]'); if (cp) { copyItem(cp.dataset.copy); return; }
   if (e.target.closest('[data-bsell]')) { openBuildSell(); return; }
+  if (e.target.closest('[data-ivok]')) { invOk(); return; }
   const o = e.target.closest('[data-op]'); if (o) { openOp(o.dataset.op); return; }
   const f = e.target.closest('[data-edit]'); if (f) openEdit(f.dataset.edit);
 });
@@ -599,6 +602,23 @@ async function busy(btn, fn) {
   const t = btn.textContent; btn.disabled = true; btn.textContent = 'Записываю…';
   try { await fn(); } catch (e) { haptic('error'); toast('⚠️ ' + e.message, 5000); btn.disabled = false; btn.textContent = t;
     if (/изменилась|не найден/i.test(e.message)) refresh(true); }
+}
+
+/* инвентаризация: «✔ Всё верно» — товар на месте, количество совпало (отмечается сразу, запись в «Журнал» в фоне) */
+async function invOk() {
+  const it = cur; if (!it || !D.inv || it.ck || opPending) return;
+  it.ck = 1; opPending = true; renderItem(); renderMain();
+  try {
+    const j = await api('inv', { cmd: 'ok', sheet: D.sheets[it.s].name, row: it.r, id: it.id, name: it.n });
+    if (typeof j.qty === 'number') it.q = j.qty;
+    opPending = false; haptic('success'); toast(j.message);
+  } catch (e) {
+    it.ck = 0; opPending = false;
+    haptic('error'); toast('⚠️ ' + e.message, 6000);
+    if (/изменилась|не найден/i.test(e.message)) refresh(true);
+  }
+  if (cur === it) renderItem();
+  renderMain(); saveCache();
 }
 
 /* операции: продажа / приход / возврат / списание / пересчёт */
@@ -627,10 +647,11 @@ function openOp(code) {
   $('opok').addEventListener('click', async () => {
     if (opPending || $('opok').disabled) return;
     const q = Math.floor(Number($('opq').value)), extra = $('opx').value;
-    const prev = { q: it.q, s30: it.s30, s60: it.s60 };
+    const prev = { q: it.q, s30: it.s30, s60: it.s60, ck: it.ck };
     const body = { sheet: D.sheets[it.s].name, row: it.r, id: it.id, name: it.n, code: code, q: q, extra: extra };
     opPending = true;
     it.q = op.sign === 0 ? q : it.q + op.sign * q;
+    if (D.inv) it.ck = 1;
     if (code === 'sale') { it.s30 += q; it.s60 += q; }
     closeSheet(); renderItem(); renderMain(); toast('⏳ Записываю…', 1500);
     try {
@@ -639,7 +660,7 @@ function openOp(code) {
       opPending = false; renderItem(); renderMain(); saveCache();
       haptic('success'); toast(j.message);
     } catch (e) {
-      it.q = prev.q; it.s30 = prev.s30; it.s60 = prev.s60;
+      it.q = prev.q; it.s30 = prev.s30; it.s60 = prev.s60; it.ck = prev.ck;
       opPending = false; renderItem(); renderMain();
       haptic('error'); toast('⚠️ ' + e.message + ' Остаток возвращён.', 6000);
       if (/изменилась|не найден/i.test(e.message)) refresh(true);
