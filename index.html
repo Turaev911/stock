@@ -535,7 +535,7 @@ function renderItem() {
     '<div class="card"><div class="kv"><span>В наличии</span><span class="big" style="color:var(--' + (it.q <= 0 ? 'hint' : it.q <= D.lowQty ? 'warn' : 'ok') + ')">' + it.q + ' шт.</span></div>' +
     '<div class="kv"><span>Продано за 30 дней</span><span>' + it.s30 + ' шт.</span></div>' +
     '<div class="kv"><span>Лист · ID</span><span>' + esc(sh.name.trim()) + ' · ' + it.id + '</span></div>' +
-    (invE(it) ? '<div class="kv"><span>Инвентаризация</span><span style="color:var(--' + (it.ck ? 'ok' : 'warn') + ')">' + (it.ck ? '✔ проверен' : '⏳ не проверен') + '</span></div>' : '') + '</div>';
+    (invRecOf(it) ? '<div class="kv"><span>Инвентаризация' + (invE(it) ? '' : ' (завершена)') + '</span><span style="color:var(--' + (it.ck ? 'ok' : 'warn') + ')">' + (it.ck ? '✔ проверен' : '⏳ не проверен') + '</span></div>' : '') + '</div>';
   if (invE(it) && !it.ck && canEdit()) h +='<div class="ops"><button class="op wide" data-ivok="1">✔ Всё верно — на месте ' + Math.max(0, it.q) + ' шт.</button></div>';
   if (canEdit()) {
     h += '<div class="ops">' + ['sale', 'in', 'ret', 'wo'].map(k => '<button class="op" data-op="' + k + '">' + OPS[k].icon + ' ' + OPS[k].name + '</button>').join('') +
@@ -606,6 +606,8 @@ async function busy(btn, fn) {
 
 /* инвентаризация идёт по листам: D.inv = { 'SSD': {start, by}, … } или { '*': … } (все листы); товар «под инвентаризацией», только если его лист в списке */
 function invE(it) { return D.inv ? (D.inv[D.sheets[it.s].name.trim()] || D.inv['*'] || null) : null; }
+/* завершённые инвентаризации (D.invDone): отметки видны, «Всё верно» уже нельзя */
+function invRecOf(it) { const r = Object.assign({}, D.invDone || {}, D.inv || {}); return r[D.sheets[it.s].name.trim()] || r['*'] || null; }
 /* инвентаризация: «✔ Всё верно» — товар на месте, количество совпало (отмечается сразу, запись в «Журнал» в фоне) */
 async function invOk() {
   const it = cur; if (!it || !invE(it) || it.ck || opPending) return;
