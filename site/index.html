@@ -917,7 +917,15 @@ $('logout').addEventListener('click', () => {
   if (t) api({ action: 'weblogout', token: t }).catch(() => {});   // и на сервере сессию закрываем
   showLogin('Вы вышли с сайта.');
 });
-setInterval(() => { if (!document.hidden && getToken() && D && !window.DEMO_DATA && !opBusy && !invBusy) load(true); }, 90000);   // полное обновление (журнал, продажи, ручные правки в таблице)
+setInterval(() => { if (!document.hidden && getToken() && D && !window.DEMO_DATA && !opBusy && !invBusy) load(true); }, 60000);   // полное обновление (журнал, продажи, ручные правки в таблице)
+/* Вернулись на вкладку сайта (компьютер спал, была открыта другая вкладка) — сразу перечитываем склад: пока вкладка была скрыта, опрос стоял,
+   а в мини-приложении или боте могли начать/завершить инвентаризацию или что-то отметить. */
+let pollKick = false;
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !getToken() || !D || window.DEMO_DATA) return;
+  pollKick = true;
+  if (!opBusy && !invBusy) load(true);
+});
 
 /* ---------- синхронизация («длинный опрос»): запрос «что изменилось?» висит на сервере до 20 секунд и отвечает сразу, как только
    кто-то (бот, мини-приложение, другой компьютер) изменил остаток; потом тут же спрашиваем снова ---------- */
@@ -937,7 +945,9 @@ function applyChanges(list) {
       else if (j.rev !== D.rev) { applyChanges(j.ch); D.rev = j.rev; render(); refreshDet(); }
     } catch (e) {
       if (e.code === 'auth') { setToken(''); closeDet(); showLogin(e.message); }
-      fails++; await sleep(Math.min(15000, 1500 * fails));
+      fails++; pollKick = false;
+      const until = Date.now() + Math.min(15000, 1500 * fails);
+      while (Date.now() < until && !pollKick) await sleep(300);   // вернулись на вкладку — не ждём, пробуем сразу
     }
   }
 })();
