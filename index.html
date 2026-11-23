@@ -219,6 +219,25 @@
   .btn.sec { box-shadow: none; }
   #toast { border-radius: 22px; background: rgba(20,32,58,.86); -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px); padding: 13px 18px; }
   @media (min-width: 760px) { #sheet { border-radius: 28px 28px 0 0; } }
+
+  /* Инвентаризация */
+  .ivbar { height: 8px; border-radius: 999px; background: var(--sec); overflow: hidden; margin: 10px 0 8px; }
+  .ivbar b { display: block; height: 100%; background: var(--btn); border-radius: 999px; transition: width .3s; }
+  .ivhd { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .ivhd b { font-size: 17px; }
+  .ivhd span { color: var(--hint); font-size: 12px; text-align: right; }
+  .ivwarn { color: var(--warn); }
+  .ivbtns { display: flex; gap: 8px; margin-top: 12px; }
+  .ivbtns .btn { height: 42px; font-size: 14px; }
+  .ivrow { display: flex; align-items: center; border-bottom: 1px solid var(--sep); }
+  .ivrow:last-child { border-bottom: 0; }
+  .ivrow .row { border-bottom: 0; flex: 1; min-width: 0; padding-right: 6px; }
+  .ivq { flex: none; width: 42px; height: 42px; margin-right: 10px; border-radius: 50%; background: var(--btn); color: #fff; font-size: 18px; font-weight: 700;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.45), 0 6px 12px -6px rgba(10,122,255,.8); }
+  .ivq:active { transform: scale(.92); }
+  .seg { display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: var(--sec); margin: 4px 0 10px; }
+  .seg button { flex: 1; padding: 8px 6px; border-radius: 999px; font-weight: 600; font-size: 14px; color: var(--hint); }
+  .seg button.on { background: #fff; color: var(--text); box-shadow: 0 2px 8px -2px rgba(10,60,130,.25); }
 </style>
 </head>
 <body>
@@ -328,7 +347,7 @@ function setData(d) {
 }
 function saveCache() {
   if (DEMO || !D) return;
-  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ me: D.me, sheets: D.sheets, lowQty: D.lowQty, at: D.at, slots: D.slots, builds: D.builds,
+  try { localStorage.setItem(CACHE_KEY, JSON.stringify({ me: D.me, sheets: D.sheets, lowQty: D.lowQty, at: D.at, slots: D.slots, builds: D.builds, inv: D.inv, invDone: D.invDone,
     items: D.items.map(({ hay, hayC, ...x }) => x) })); } catch (e) {}
 }
 function loadCache() { try { const s = localStorage.getItem(CACHE_KEY); return s ? JSON.parse(s) : null; } catch (e) { return null; } }
@@ -359,11 +378,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 (async function pollLoop() {
   let fails = 0;
   for (;;) {
-    if (document.hidden || !D || DEMO || syncing || opPending) { await sleep(1000); continue; }
+    if (document.hidden || !D || DEMO || syncing || opPending || invBusy) { await sleep(1000); continue; }
     try {
       const j = await api('changes', { since: D.rev == null ? null : D.rev, wait: 20 }, 40000);
       fails = 0;
-      if (opPending) continue;                           // пока своя операция записывается — чужие данные не подмешиваем
+      if (opPending || invBusy) continue;                          // пока своя операция записывается — чужие данные не подмешиваем
       if (j.full) await refresh(true);                   // новый товар, данные, сборка, раздел — перечитываем всё
       else if (j.rev !== D.rev) {
         j.ch.forEach(c => { const it = D.items.find(x => D.sheets[x.s].name.trim() === c.s && x.id === c.i); if (it) { it.q = c.q; if (invE(it)) it.ck = 1; } });
@@ -383,7 +402,8 @@ function fatal(msg) {
 
 /* ---------- вкладки ---------- */
 function renderTabs() {
-  const t = [['stock', '📦 Склад'], ['low', '⚠️ Заканчивается'], ['sales', '📊 Продажи'], ['builds', '🛠 Сборки']];
+  const ivN = D.inv ? invLeft().length : 0;
+  const t = [['stock', '📦 Склад'], ['low', '⚠️ Заканчивается'], ['inv', '🔎 Инвентаризация' + (ivN ? ' · ' + ivN : '')], ['sales', '📊 Продажи'], ['builds', '🛠 Сборки']];
   if (canEdit()) t.push(['new', '➕ Новый']);
   $('tabs').innerHTML = t.map(([k, l]) => '<button class="tab' + (view === k ? ' on' : '') + '" data-tab="' + k + '">' + l + '</button>').join('');
 }
@@ -448,9 +468,11 @@ document.addEventListener('click', e => {
 
 function renderMain() {
   if (!D) return;
+  renderTabs();                                   // счётчик непроверенных на вкладке «Инвентаризация»
   const m = $('main');
   if (view === 'stock') m.innerHTML = stockHtml();
   else if (view === 'low') m.innerHTML = lowHtml();
+  else if (view === 'inv') m.innerHTML = invHtml();
   else if (view === 'sales') m.innerHTML = salesHtml();
   else if (view === 'new') m.innerHTML = newHtml();
   else if (view === 'builds') m.innerHTML = buildsHtml();
@@ -608,21 +630,129 @@ async function busy(btn, fn) {
 function invE(it) { return D.inv ? (D.inv[D.sheets[it.s].name.trim()] || D.inv['*'] || null) : null; }
 /* завершённые инвентаризации (D.invDone): отметки видны, «Всё верно» уже нельзя */
 function invRecOf(it) { const r = Object.assign({}, D.invDone || {}, D.inv || {}); return r[D.sheets[it.s].name.trim()] || r['*'] || null; }
-/* инвентаризация: «✔ Всё верно» — товар на месте, количество совпало (отмечается сразу, запись в «Журнал» в фоне) */
-async function invOk() {
-  const it = cur; if (!it || !invE(it) || it.ck || opPending) return;
-  it.ck = 1; opPending = true; renderItem(); renderMain();
+const isAdmin = () => D && D.me.role === 'админ';
+const invLeft = () => D.items.filter(i => invE(i) && i.q > 0 && !i.ck);
+const invLeftOf = k => invLeft().filter(i => k === '*' || D.sheets[i.s].name.trim() === k);
+const invLbl = k => k === '*' ? 'Все листы' : k;
+const fmtDT = ms => new Date(ms).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+let invBusy = 0, ivCat = -1, ivSeg = 'left', ivLimit = LIST_LIMIT;
+
+/* инвентаризация: «✔ Всё верно» — товар на месте, количество совпало (отмечается сразу, запись в «Журнал» в фоне; можно отмечать подряд) */
+async function invOk(it) {
+  it = it || cur; if (!it || !invE(it) || it.ck || !canEdit()) return;
+  it.ck = 1; invBusy++; haptic('success');
+  if (cur === it) renderItem();
+  renderTabs(); renderMain();
   try {
     const j = await api('inv', { cmd: 'ok', sheet: D.sheets[it.s].name, row: it.r, id: it.id, name: it.n });
     if (typeof j.qty === 'number') it.q = j.qty;
-    opPending = false; haptic('success'); toast(j.message);
+    toast('✔ Отмечено: ' + oneLine(it.n).slice(0, 50), 1800);
   } catch (e) {
-    it.ck = 0; opPending = false;
+    it.ck = 0;
     haptic('error'); toast('⚠️ ' + e.message, 6000);
-    if (/изменилась|не найден/i.test(e.message)) refresh(true);
-  }
+    if (/изменилась|не найден|не идёт/i.test(e.message)) refresh(true);
+  } finally { invBusy--; }
   if (cur === it) renderItem();
-  renderMain(); saveCache();
+  renderTabs(); renderMain(); saveCache();
+}
+
+/* вкладка «Инвентаризация» — то же, что страница «Инвентаризация» на сайте */
+function invHtml() {
+  const inv = D.inv || {}, keys = Object.keys(inv);
+  const fin = D.invDone || {}, cardKeys = keys.concat(Object.keys(fin).filter(k => !inv[k]));   // идущие сверху, завершённые ниже
+  let h = '';
+  // карточки листов: идущие и завершённые
+  cardKeys.forEach(k => {
+    const its = D.items.filter(i => invRecOf(i) && (k === '*' || D.sheets[i.s].name.trim() === k));
+    const all = its.filter(i => i.q > 0 || i.ck), done = its.filter(i => i.ck), left = its.filter(i => i.q > 0 && !i.ck);
+    const pct = all.length ? Math.round(done.length / all.length * 100) : 100, units = left.reduce((s, i) => s + i.q, 0);
+    const active = !!inv[k], r = inv[k] || fin[k];
+    const when = active ? 'с ' + fmtDT(r.start) + '<br>' + esc(r.by || '') : 'завершена ' + fmtDT(r.end) + '<br>' + esc(r.by || '');
+    h += '<div class="card"><div class="ivhd"><b>' + esc(invLbl(k)) + (active ? '' : ' ✓') + '</b><span>' + when + '</span></div>' +
+      '<div class="ivbar"><b style="width:' + pct + '%"></b></div>' +
+      '<div class="sub" style="margin:0">Проверено <b>' + done.length + '</b> из <b>' + all.length + '</b> (' + pct + '%)' +
+        (left.length ? ' · не проверены: <b class="ivwarn">' + left.length + ' поз., ' + units + ' шт.</b>' : '') + '</div>' +
+      (active && canEdit() ? '<div class="ivbtns">' + (isAdmin() && left.length ? '<button class="btn sec" data-inv="zero" data-sheet="' + esc(k) + '">Обнулить (' + left.length + ')</button>' : '') +
+        '<button class="btn" data-inv="end" data-sheet="' + esc(k) + '">Завершить</button></div>' : '') + '</div>';
+  });
+  // начать (ещё один) лист
+  if (!inv['*']) {
+    const chips = D.sheets.map(s => s.name.trim()).filter(n => !inv[n]).map(n => '<button class="chip" data-inv="start" data-sheet="' + esc(n) + '">▶ ' + esc(n) + '</button>').join('') +
+      (keys.length ? '' : '<button class="chip on" data-inv="start" data-sheet="*">▶ Все листы</button>');
+    h += '<div class="card"><div style="font-weight:700">' + (keys.length ? 'Начать ещё один лист' : 'Инвентаризация сейчас не идёт') + '</div>' +
+      (keys.length ? '' : '<div class="sub" style="margin:6px 0 0;line-height:1.5">Выберите <b>один лист</b> (например, SSD). Потом у каждого найденного товара делайте «Пересчёт» или «✔ Всё верно». ' +
+        'Товары с остатком, которые никто не тронул, попадут в «Не проверены» — скорее всего, их уже нет. Другие листы не затрагиваются.</div>') +
+      (canEdit() ? '<div class="sub" style="margin:10px 0 6px">Какой лист пересчитываете?</div><div class="chips" style="flex-wrap:wrap;padding:0">' + chips + '</div>'
+        : '<div class="sub" style="margin:10px 0 0">Начать могут админ и редактор.</div>') + '</div>';
+  }
+  if (!cardKeys.length) return h;
+  // списки «Не проверены» / «Проверены» с фильтром по листу
+  const act = D.items.filter(i => invRecOf(i));
+  const left = act.filter(i => i.q > 0 && !i.ck), done = act.filter(i => i.ck);
+  if (ivCat >= 0 && !act.some(i => i.s === ivCat)) ivCat = -1;
+  const inCat = i => ivCat < 0 || i.s === ivCat;
+  const src = ivSeg === 'left' ? left : done;
+  const chipsF = '<button class="chip' + (ivCat < 0 ? ' on' : '') + '" data-ivcat="-1">Все <small>' + src.length + '</small></button>' +
+    D.sheets.map((s, k) => { const n = src.filter(i => i.s === k).length; return n ? '<button class="chip' + (ivCat === k ? ' on' : '') + '" data-ivcat="' + k + '">' + esc(s.name.trim()) + ' <small>' + n + '</small></button>' : ''; }).join('');
+  const L = left.filter(inCat), Dn = done.filter(inCat).slice().reverse();
+  const list = ivSeg === 'left' ? L : Dn;
+  h += '<div class="seg"><button data-ivseg="left"' + (ivSeg === 'left' ? ' class="on"' : '') + '>⏳ Не проверены · ' + L.length + '</button>' +
+    '<button data-ivseg="done"' + (ivSeg === 'done' ? ' class="on"' : '') + '>✔ Проверены · ' + Dn.length + '</button></div>' +
+    '<div class="chips">' + chipsF + '</div>';
+  if (ivSeg === 'left') h += '<div class="note">В таблице есть остаток, но после начала инвентаризации товар никто не трогал. Нажмите на строку, чтобы открыть карточку.</div>';
+  if (!list.length) return h + '<div class="empty">' + (ivSeg === 'left' ? (left.length ? 'В этом разделе всё проверено 🎉' : 'Все товары проверены 🎉') : 'Пока ничего не отмечено') + '</div>';
+  h += '<div class="list">' + list.slice(0, ivLimit).map(it => {
+    const ok = ivSeg === 'left' && canEdit() && invE(it);
+    return ok ? '<div class="ivrow">' + rowHtml(it) + '<button class="ivq" data-ivq="' + it.s + ':' + it.id + '" aria-label="Всё верно" title="Всё верно, на месте">✔</button></div>' : rowHtml(it);
+  }).join('') + '</div>';
+  if (list.length > ivLimit) h += '<div style="text-align:center;margin-top:12px"><button class="chip" data-ivmore="1">Показать ещё (осталось ' + (list.length - ivLimit) + ')</button></div>';
+  return h;
+}
+document.addEventListener('click', e => {
+  if (!D || view !== 'inv' || e.target.closest('#page, #shade')) return;
+  const q = e.target.closest('[data-ivq]');
+  if (q) { const [s, id] = q.dataset.ivq.split(':').map(Number); const it = D.items.find(x => x.s === s && x.id === id); if (it) invOk(it); return; }
+  const sg = e.target.closest('[data-ivseg]'); if (sg) { ivSeg = sg.dataset.ivseg; ivLimit = LIST_LIMIT; renderMain(); return; }
+  const c = e.target.closest('[data-ivcat]'); if (c) { ivCat = Number(c.dataset.ivcat); ivLimit = LIST_LIMIT; renderMain(); return; }
+  if (e.target.closest('[data-ivmore]')) { ivLimit += LIST_LIMIT; renderMain(); return; }
+  const b = e.target.closest('[data-inv]'); if (b) invAsk(b.dataset.inv, b.dataset.sheet || '');
+});
+
+/* начать / обнулить / завершить — с окном подтверждения, как на сайте */
+function invAsk(cmd, key) {
+  key = String(key || '');
+  if (cmd === 'zero' ? !isAdmin() : !canEdit()) return;
+  const left = invLeftOf(key);
+  const who = key === '*' ? 'всех листов' : 'листа «' + esc(key) + '»';
+  let title, text, btn;
+  if (cmd === 'start') {
+    title = 'Начать инвентаризацию ' + who + '?';
+    text = key === '*'
+      ? 'Под инвентаризацию попадут ВСЕ листы сразу. Всё, что вы пересчитаете или отметите «✔ Всё верно», считается проверенным, остальное попадёт в «Не проверены». Лучше вести по одному листу.'
+      : 'С этой минуты всё, что вы пересчитаете или отметите «✔ Всё верно» на листе «' + esc(key) + '», считается проверенным. Остальные товары этого листа попадут в «Не проверены». <b>Другие листы не затрагиваются.</b>';
+    btn = '▶ Начать';
+  } else if (cmd === 'zero') {
+    if (!left.length) return;
+    title = 'Обнулить ' + left.length + ' поз.?';
+    text = 'У этих товаров (' + who + ') количество станет 0 (' + left.reduce((s, i) => s + i.q, 0) + ' шт. всего). Строки не удаляются, в «Журнал» запишется «было → 0», так что вернуть можно.<br><br>' +
+      left.slice(0, 8).map(i => '• ' + esc(oneLine(i.n).slice(0, 70)) + ' — ' + i.q + ' шт.').join('<br>') + (left.length > 8 ? '<br>…и ещё ' + (left.length - 8) : '');
+    btn = 'Обнулить';
+  } else {
+    title = 'Завершить инвентаризацию ' + who + '?';
+    text = (left.length ? '<span class="ivwarn">Не проверены ещё ' + left.length + ' поз.</span> ' : 'Все товары проверены. ') +
+      'Количества <b>не меняются</b>. Отметки ✔ останутся, непроверенные будут без галочки. Другие листы не затрагиваются.';
+    btn = 'Завершить';
+  }
+  openSheet('<h2>' + title + '</h2><div class="sub" style="line-height:1.5;font-size:14px">' + text + '</div>' +
+    '<div class="btns"><button class="btn sec" data-cancel>Отмена</button><button class="btn" id="ivgo">' + btn + '</button></div>');
+  $('ivgo').addEventListener('click', () => busy($('ivgo'), async () => {
+    const body = { cmd: cmd, sheet: key };
+    if (cmd === 'zero') body.items = invLeftOf(key).map(i => ({ sheet: D.sheets[i.s].name, row: i.r, id: i.id, name: i.n }));
+    const j = await api('inv', body);
+    closeSheet(); haptic('success'); toast(j.message, 5000);
+    if (cmd === 'start') { ivSeg = 'left'; ivCat = -1; }
+    await refresh(true);
+  }));
 }
 
 /* операции: продажа / приход / возврат / списание / пересчёт */
