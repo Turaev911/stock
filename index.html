@@ -360,7 +360,7 @@ async function refresh(silent) {
   try {
     const j = await api('init');
     delete j.ok;
-    setData(j); saveCache();
+    setData(j); saveCache(); lastFull = Date.now();
     if (!silent) toast('✅ Склад обновлён', 1500);
   } catch (e) {
     if (e.code === 'auth' || e.code === 'noaccess') { clearCache(); D = null; fatal(e.message); }
@@ -391,9 +391,28 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
         if (cur) renderItem();
         saveCache();
       }
-    } catch (e) { fails++; await sleep(Math.min(15000, 1500 * fails)); }   // нет связи / auth — молча ждём и пробуем снова
+    } catch (e) {                                        // нет связи / auth — молча ждём и пробуем снова
+      fails++; pollKick = false;
+      const until = Date.now() + Math.min(15000, 1500 * fails);
+      while (Date.now() < until && !pollKick) await sleep(300);   // вернулись в приложение — не ждём, пробуем сразу
+    }
   }
 })();
+let pollKick = false;
+/* Вернулись в мини-приложение (телефон был заблокирован, переключались на другой чат) — сразу перечитываем склад:
+   пока окно было скрыто, опрос стоял, и на сайте или в боте могли начать/завершить инвентаризацию или что-то отметить. */
+let lastFull = Date.now();
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden || !D || DEMO) return;
+  pollKick = true;
+  if (!opPending && !invBusy) { lastFull = Date.now(); refresh(true); }
+});
+/* Подстраховка: раз в минуту (пока окно открыто) полностью перечитываем склад — как сайт. */
+setInterval(() => {
+  if (document.hidden || !D || DEMO || syncing || opPending || invBusy || Date.now() - lastFull < 55000) return;
+  if (view === 'new' || (view === 'builds' && bview === 'new')) return;   // форму «Новый» не трогаем
+  lastFull = Date.now(); refresh(true);
+}, 5000);
 
 function fatal(msg) {
   $('hdr').classList.add('hidden'); closePage(); closeSheet();
