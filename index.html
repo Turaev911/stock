@@ -238,6 +238,8 @@
   .seg { display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: var(--sec); margin: 4px 0 10px; }
   .seg button { flex: 1; padding: 8px 6px; border-radius: 999px; font-weight: 600; font-size: 14px; color: var(--hint); }
   .seg button.on { background: #fff; color: var(--text); box-shadow: 0 2px 8px -2px rgba(10,60,130,.25); }
+  /* Черновик сборки */
+  .st.draft { background: rgba(120,90,220,.14); color: #6a4bd6; }
 </style>
 </head>
 <body>
@@ -343,6 +345,8 @@ function setData(d) {
   // и теряется выбранное фото (поле выбора файла исчезает из страницы, пока открыта камера).
   renderTabs(); if (!(view === 'new' || (view === 'builds' && bview === 'new')) || !had) renderMain();
   if (curBuild) { const b = (D.builds || []).find(x => x.no === curBuild.no); if (b) { curBuild = b; renderBuild(); } else closePage(); }
+  // открытую на правку сборку кто-то продал/удалил/собрал на другом экране — выходим из формы
+  if (bedit) { const b = (D.builds || []).find(x => x.no === bedit.no); if (!b || isSold(b) || isDraftB(b) !== isDraftB(bedit)) { toast('Сборку №' + bedit.no + ' изменили на другом экране.', 4000); leaveForm(); } }
   if (cur) { const f = D.items.find(x => x.s === cur.s && x.id === cur.id); cur = f || null; if (cur) renderItem(); else closePage(); }
 }
 function saveCache() {
@@ -576,6 +580,8 @@ function renderItem() {
     '<div class="card"><div class="kv"><span>В наличии</span><span class="big" style="color:var(--' + (it.q <= 0 ? 'hint' : it.q <= D.lowQty ? 'warn' : 'ok') + ')">' + it.q + ' шт.</span></div>' +
     '<div class="kv"><span>Продано за 30 дней</span><span>' + it.s30 + ' шт.</span></div>' +
     '<div class="kv"><span>Лист · ID</span><span>' + esc(sh.name.trim()) + ' · ' + it.id + '</span></div>' +
+    (() => { const r = rsvBy(it); return r.length ? '<div class="kv"><span>📝 В черновиках сборок</span><span style="color:#6a4bd6">' + r.map(x => '№' + x.no + ': ' + x.q + ' шт.').join(', ') +
+      '<br><small style="color:var(--hint)">свободно ' + Math.max(0, it.q - r.reduce((s, x) => s + x.q, 0)) + ' шт.</small></span></div>' : ''; })() +
     (invRecOf(it) ? '<div class="kv"><span>Инвентаризация' + (invE(it) ? '' : ' (завершена)') + '</span><span style="color:var(--' + (it.ck ? 'ok' : 'warn') + ')">' + (it.ck ? '✔ проверен' : '⏳ не проверен') + '</span></div>' : '') + '</div>';
   if (invE(it) && !it.ck && canEdit()) h +='<div class="ops"><button class="op wide" data-ivok="1">✔ Всё верно — на месте ' + Math.max(0, it.q) + ' шт.</button></div>';
   if (canEdit()) {
@@ -637,7 +643,7 @@ $('shade').addEventListener('click', e => { if (e.target.id === 'shade' || e.tar
 function goBack() {
   if (!$('shade').classList.contains('hidden')) closeSheet();
   else if (cur || curBuild) closePage();
-  else if (view === 'builds' && bview === 'new') { bview = 'list'; renderMain(); if (tg) tg.BackButton.hide(); }
+  else if (view === 'builds' && bview === 'new') leaveForm();
 }
 async function busy(btn, fn) {
   const t = btn.textContent; btn.disabled = true; btn.textContent = 'Записываю…';
@@ -787,9 +793,12 @@ function openOp(code) {
     const q = Math.floor(Number($('opq').value));
     const ok = q >= 0 && (code === 'cnt' || q > 0);
     const after = op.sign === 0 ? q : it.q + op.sign * q;
-    $('opp').innerHTML = ok ? 'Остаток: <b>' + it.q + '</b> → <b style="color:var(--' + (after < 0 ? 'bad' : 'text') + ')">' + after + '</b> шт.' +
-      (after < 0 ? '<br><span style="color:var(--bad)">На складе только ' + it.q + ' шт.</span>' : '') : '';
-    $('opok').disabled = !ok || after < 0;
+    const rsv = op.sign < 0 ? rsvBy(it).reduce((s, x) => s + x.q, 0) : 0;   // детали в черновиках сборок продавать/списывать нельзя
+    const lock = after >= 0 && rsv > 0 && after < rsv;
+    $('opp').innerHTML = ok ? 'Остаток: <b>' + it.q + '</b> → <b style="color:var(--' + (after < 0 || lock ? 'bad' : 'text') + ')">' + after + '</b> шт.' +
+      (after < 0 ? '<br><span style="color:var(--bad)">На складе только ' + it.q + ' шт.</span>' : '') +
+      (lock ? '<br><span style="color:var(--bad)">' + rsv + ' шт. зарезервировано в черновиках сборок (' + rsvBy(it).map(x => '№' + x.no).join(', ') + '). Свободно: ' + Math.max(0, it.q - rsv) + ' шт.</span>' : '') : '';
+    $('opok').disabled = !ok || after < 0 || lock;
   };
   $('opq').addEventListener('input', upd);
   $('sheet').querySelectorAll('[data-step]').forEach(b => b.addEventListener('click', () => {
@@ -1003,6 +1012,9 @@ function confirmNew() {
 }
 
 /* ---------- сборки серверов ---------- */
+// Черновик — детали только зарезервированы (со склада не списаны), состав можно менять сколько угодно.
+// Собран — детали списаны, сервер стоит на складе; состав можно менять (снятая деталь вернётся на склад, добавленная спишется).
+// Продан — состав закрыт.
 // Раздел сборки по названию листа (если таблица не прислала — считаем сами, так же, как скрипт)
 const SLOT_RE = [['Платформа', /server|сервер|платформ/i], ['Процессор', /cpu|процессор/i], ['Память', /^\s*ram|памят|memory/i],
   ['SSD', /ssd|nvme/i], ['HDD', /hdd/i], ['Сеть / FC', /network|сет|nic|\bfc\b/i], ['RAID', /raid/i], ['Блок питания', /psu|блок/i],
@@ -1012,66 +1024,111 @@ const slotList = () => D.slots || SLOT_RE.map(s => s[0]);
 const bItem = p => D.items.find(x => x.s === p.s && x.id === p.id);
 const fmtDate = s => { if (!s) return ''; const d = new Date(s); return isNaN(d) ? String(s) : d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); };
 const isSold = b => /продан/i.test(b.st);
+const isDraftB = b => /черновик/i.test(b.st);
+const bStatus = b => isDraftB(b) ? ['draft', 'Черновик'] : isSold(b) ? ['sold', 'Продан'] : ['built', 'Собран'];
+const ikey = it => sheetName(it) + '|' + it.id;
+/** Резерв деталей черновиками: { 'лист|ID': шт } (кроме черновика №exceptNo). */
+function rsvMap(exceptNo) {
+  const m = {};
+  (D.builds || []).forEach(b => { if (isDraftB(b) && b.no !== exceptNo) (b.items || []).forEach(p => { const k = p.s + '|' + p.i; m[k] = (m[k] || 0) + p.q; }); });
+  return m;
+}
+/** В каких черновиках деталь: [{no, q}] */
+function rsvBy(it) {
+  const k = ikey(it), out = [];
+  (D.builds || []).forEach(b => { if (isDraftB(b)) (b.items || []).forEach(p => { if (p.s + '|' + p.i === k) out.push({ no: b.no, q: p.q }); }); });
+  return out;
+}
+/** Состав сборки из таблицы → [{s: индекс листа, id, q}] */
+function bItemsToParts(b) {
+  return (b.items || []).map(p => ({ s: D.sheets.findIndex(sh => sh.name.trim() === p.s), id: p.i, q: p.q })).filter(p => p.s >= 0);
+}
+
+// Рабочая сборка в форме: новая (bdraft, хранится в телефоне) или открытая на правку (bedit = {no, st, parts, client, comment, orig})
+let bedit = null;
+const bw = () => bedit || bdraft;
+const bsave = () => { if (!bedit) saveDraft(); };
+/** Сколько штук детали можно взять в рабочую сборку (с учётом резерва других черновиков и того, что уже стоит в собранной сборке). */
+function bMax(it) {
+  const own = bedit && isDraftB(bedit) ? bedit.no : 0;
+  const free = it.q - (rsvMap(own)[ikey(it)] || 0);
+  if (bedit && !isDraftB(bedit)) { const o = bedit.orig.find(p => p.s === it.s && p.id === it.id); return free + (o ? o.q : 0); }
+  return free;
+}
 
 function buildsHtml() {
   if (bview === 'new' && canEdit()) return buildFormHtml();
   const B = D.builds || [];
-  const nb = B.filter(b => !isSold(b)).length, ns = B.length - nb;
-  const list = B.filter(b => bfilter === 'all' || (bfilter === 'sold') === isSold(b));
+  const n = { draft: 0, built: 0, sold: 0 };
+  B.forEach(b => n[bStatus(b)[0]]++);
+  const list = B.filter(b => bfilter === 'all' || bStatus(b)[0] === bfilter);
   let h = (canEdit() ? '<button class="btn" id="bnew" style="width:100%;margin-bottom:10px">➕ Новая сборка' +
-    (bdraft.parts.length ? ' (черновик: ' + bdraft.parts.length + ' поз.)' : '') + '</button>' : '') +
-    '<div class="chips">' + [['built', '🟡 На складе', nb], ['sold', '🟢 Проданы', ns], ['all', 'Все', B.length]].map(([k, l, n]) =>
-      '<button class="chip' + (bfilter === k ? ' on' : '') + '" data-bfilter="' + k + '">' + l + ' <small>' + n + '</small></button>').join('') + '</div>';
+    (bdraft.parts.length ? ' (не сохранено: ' + bdraft.parts.length + ' поз.)' : '') + '</button>' : '') +
+    '<div class="chips">' + [['draft', '📝 Черновики', n.draft], ['built', '🟡 На складе', n.built], ['sold', '🟢 Проданы', n.sold], ['all', 'Все', B.length]].map(([k, l, c]) =>
+      '<button class="chip' + (bfilter === k ? ' on' : '') + '" data-bfilter="' + k + '">' + l + ' <small>' + c + '</small></button>').join('') + '</div>';
   if (!list.length) return h + '<div class="empty">' + (B.length ? 'Здесь пусто' : 'Сборок пока нет.<br>Нажмите «➕ Новая сборка» и выберите детали со склада.') + '</div>';
   return h + '<div class="list">' + list.slice(0, LIST_LIMIT).map(b => {
     const main = (b.parts.find(p => p.l === 'Платформа') || b.parts[0] || { t: '' }).t.split('\n')[0].replace(/^\d+×\s*/, '');
+    const [k, l] = bStatus(b);
     return '<button class="row" data-build="' + b.no + '"><div class="t"><div class="n">№' + b.no + ' · ' + esc(oneLine(main || 'Сборка')) + '</div>' +
-      '<div class="m">' + (isSold(b) ? esc(b.cl) + ' · ' + fmtDate(b.sd) : 'собрал ' + esc(b.by) + ' · ' + fmtDate(b.d)) + '</div></div>' +
-      '<span class="st ' + (isSold(b) ? 'sold">Продан' : 'built">Собран') + '</span></button>';
+      '<div class="m">' + (isSold(b) ? esc(b.cl) + ' · ' + fmtDate(b.sd) : (isDraftB(b) ? 'начал ' : 'собрал ') + esc(b.by) + ' · ' + fmtDate(b.d) + (b.cl ? ' · ' + esc(b.cl) : '')) + '</div></div>' +
+      '<span class="st ' + k + '">' + l + '</span></button>';
   }).join('') + '</div>';
 }
 
 function buildFormHtml() {
-  const total = bdraft.parts.reduce((s, p) => s + p.q, 0);
+  const w = bw(), total = w.parts.reduce((s, p) => s + p.q, 0);
+  const isB = bedit && !isDraftB(bedit), isD = bedit && isDraftB(bedit);
   let bad = false;
   let h = '<button class="back" id="bback">← К списку сборок</button>' +
-    '<div class="note">Выберите детали со склада. Остатки спишутся только после нажатия «Собрать». Если детали нет в таблице — сначала добавьте её (➕ Новый или 📥 Приход).</div>';
+    (bedit ? '<div class="card" style="padding:12px 14px"><b>' + (isB ? '✏️ Изменить состав сборки №' : '📝 Черновик сборки №') + bedit.no + '</b></div>' : '') +
+    '<div class="note">' + (isB ? 'Сборка уже собрана. Уберёте деталь — она <b>вернётся на склад</b>; добавите — <b>спишется</b>. Всё запишется в «Журнал».'
+      : 'Черновик: детали только <b>резервируются</b> (никто не продаст их отдельно), со склада спишутся, когда нажмёте «Собрать». Состав можно менять сколько угодно.') + '</div>';
   const used = { 'Прочее': true };   // «Прочее» — поиск по всем листам
   D.sheets.forEach(sh => { used[slotOf(sh)] = true; });
   slotList().forEach(label => {
-    const mine = bdraft.parts.map((p, i) => ({ p: p, i: i })).filter(x => { const it = bItem(x.p); return it ? slotOf(D.sheets[it.s]) === label : label === 'Прочее'; });
+    const mine = w.parts.map((p, i) => ({ p: p, i: i })).filter(x => { const it = bItem(x.p); return it ? slotOf(D.sheets[it.s]) === label : label === 'Прочее'; });
     if (!used[label] && !mine.length) return;
     h += '<div class="slot"><div class="sh"><span>' + esc(label) + (mine.length ? ' <small style="color:var(--hint);font-weight:400">· ' + mine.reduce((s, x) => s + x.p.q, 0) + ' шт.</small>' : '') + '</span>' +
       '<button class="add" data-badd="' + esc(label) + '">＋ Добавить</button></div>' +
       mine.map(({ p, i }) => {
-        const it = bItem(p);
-        const over = !it || p.q > it.q; if (over) bad = true;
+        const it = bItem(p), max = it ? bMax(it) : 0;
+        const over = !it || p.q > max; if (over) bad = true;
+        const rs = it ? (rsvMap(isD ? bedit.no : 0)[ikey(it)] || 0) : 0;
         return '<div class="bpart"><div class="t"><div class="n">' + esc(it ? oneLine(it.n) : 'Товар не найден — удалите строку') + '</div>' +
-          '<div class="m' + (over ? ' bad' : '') + '">' + (it ? esc(sheetName(it)) + ' · ID ' + it.id + ' · на складе ' + it.q + ' шт.' + (over ? ' — не хватает!' : '') : '') + '</div></div>' +
+          '<div class="m' + (over ? ' bad' : '') + '">' + (it ? esc(sheetName(it)) + ' · ID ' + it.id + ' · на складе ' + it.q + ' шт.' + (rs ? ', в других черновиках ' + rs : '') + (over ? ' — не хватает!' : '') : '') + '</div></div>' +
           '<div class="mini"><button data-bq="' + i + '" data-d="-1">−</button><b>' + p.q + '</b><button data-bq="' + i + '" data-d="1">+</button>' +
           '<button data-brm="' + i + '" title="Убрать">✕</button></div></div>';
       }).join('') + '</div>';
   });
-  h += '<div class="card"><div class="lbl" style="margin-top:0">Клиент (обязательно, если продаёте сразу)</div><input class="inp" id="bcl" maxlength="200" autocomplete="off" value="' + esc(bdraft.client) + '">' +
-    '<div class="lbl">Комментарий (необязательно)</div><input class="inp" id="bcm" maxlength="500" autocomplete="off" value="' + esc(bdraft.comment) + '">' +
+  const dis = (!total || bad) ? ' disabled' : '';
+  h += '<div class="card">' + (isB ? '' : '<div class="lbl" style="margin-top:0">Клиент (обязательно, если продаёте сразу)</div><input class="inp" id="bcl" maxlength="200" autocomplete="off" value="' + esc(w.client) + '">') +
+    '<div class="lbl"' + (isB ? ' style="margin-top:0"' : '') + '>Комментарий (необязательно)</div><input class="inp" id="bcm" maxlength="500" autocomplete="off" value="' + esc(w.comment) + '">' +
     '<div class="preview">Деталей в сборке: <b>' + total + '</b> шт.' + (bad ? '<br><span style="color:var(--bad)">Некоторых деталей не хватает на складе.</span>' : '') + '</div>' +
-    '<div class="btns" style="flex-direction:column"><button class="btn" id="bmk"' + (!total || bad ? ' disabled' : '') + '>🟡 Собрать (оставить на складе)</button>' +
-    '<button class="btn" id="bsl" style="background:var(--ok)"' + (!total || bad ? ' disabled' : '') + '>🟢 Собрать и продать</button>' +
-    (bdraft.parts.length ? '<button class="btn sec" id="bclr">🗑 Очистить черновик</button>' : '') + '</div></div>';
-  return h;
+    '<div class="btns" style="flex-direction:column">';
+  if (isB) h += '<button class="btn" id="bsave"' + dis + '>💾 Сохранить состав</button>';
+  else {
+    h += '<button class="btn sec" id="bdft"' + dis + ' style="background:#fff;border:1px solid var(--sep)">📝 ' + (isD ? 'Сохранить черновик' : 'Сохранить как черновик') + '</button>' +
+      '<button class="btn" id="bmk"' + dis + '>🟡 Собрать (оставить на складе)</button>' +
+      '<button class="btn" id="bsl" style="background:var(--ok)"' + dis + '>🟢 Собрать и продать</button>';
+    if (isD) h += '<button class="btn sec" id="bdel">🗑 Удалить черновик</button>';
+    else if (w.parts.length) h += '<button class="btn sec" id="bclr">🗑 Очистить</button>';
+  }
+  return h + '</div></div>';
 }
 
 function openPicker(label) {
   const sheetsOk = D.sheets.map((sh, i) => label === 'Прочее' || slotOf(sh) === label ? i : -1).filter(i => i >= 0);
-  openSheet('<h2>＋ ' + esc(label) + '</h2><div class="sub">Нажмите на деталь, чтобы добавить. Серые — нет на складе.</div>' +
+  openSheet('<h2>＋ ' + esc(label) + '</h2><div class="sub">Нажмите на деталь, чтобы добавить. Серые — нет свободных на складе.</div>' +
     '<div class="search" style="margin-bottom:10px">🔎<input id="bps" type="search" placeholder="Модель, P/N, объём…" autocomplete="off"></div><div id="bpl"></div>');
   const draw = () => {
     const tokens = norm($('bps').value).split(' ').filter(Boolean);
     let items = D.items.filter(it => sheetsOk.indexOf(it.s) >= 0 && tokens.every(t => it.hay.indexOf(t) >= 0 || (t.length >= 4 && it.hayC.indexOf(t.replace(/[\-\/.]/g, '')) >= 0)));
-    items.sort((a, b) => (b.q > 0) - (a.q > 0) || b.s60 - a.s60);
-    $('bpl').innerHTML = items.length ? '<div class="list">' + items.slice(0, 80).map(it =>
-      '<button class="row' + (it.q > 0 ? '' : ' off') + '" data-bpick="' + it.s + ':' + it.id + '"><div class="t"><div class="n">' + esc(oneLine(it.n)) + '</div>' +
-      '<div class="m">' + esc(sheetName(it)) + ' · ID ' + it.id + '</div></div><span class="qty ' + qtyClass(it.q) + '">' + (it.q > 0 ? it.q : '0') + '</span></button>').join('') + '</div>' +
+    items = items.map(it => ({ it: it, f: bMax(it) }));
+    items.sort((a, b) => (b.f > 0) - (a.f > 0) || b.it.s60 - a.it.s60);
+    $('bpl').innerHTML = items.length ? '<div class="list">' + items.slice(0, 80).map(({ it, f }) =>
+      '<button class="row' + (f > 0 ? '' : ' off') + '" data-bpick="' + it.s + ':' + it.id + '"><div class="t"><div class="n">' + esc(oneLine(it.n)) + '</div>' +
+      '<div class="m">' + esc(sheetName(it)) + ' · ID ' + it.id + (f < it.q ? ' · свободно ' + Math.max(0, f) + ' из ' + it.q : '') + '</div></div><span class="qty ' + qtyClass(f) + '">' + (f > 0 ? f : '0') + '</span></button>').join('') + '</div>' +
       (items.length > 80 ? '<div class="more">Показано 80 из ' + items.length + ' — уточните поиск</div>' : '')
       : '<div class="empty">Ничего не найдено.<br>Если детали нет в таблице — сначала добавьте её.</div>';
   };
@@ -1079,9 +1136,21 @@ function openPicker(label) {
   draw();
 }
 
+function openBuildForm(b) {
+  if (b) {
+    const parts = bItemsToParts(b);
+    bedit = { no: b.no, st: b.st, parts: parts.map(p => Object.assign({}, p)), orig: parts, client: b.cl || '', comment: b.cm || '' };
+  } else bedit = null;
+  closePage(); view = 'builds'; bview = 'new'; renderTabs(); renderMain(); window.scrollTo(0, 0); if (tg) tg.BackButton.show();
+}
+function leaveForm(filter) {
+  bedit = null; bview = 'list'; if (filter) bfilter = filter;
+  if (tg) tg.BackButton.hide(); renderMain();
+}
+
 document.addEventListener('click', e => {
-  if (e.target.id === 'bnew') { bview = 'new'; renderMain(); window.scrollTo(0, 0); if (tg) tg.BackButton.show(); return; }
-  if (e.target.id === 'bback') { bview = 'list'; renderMain(); if (tg) tg.BackButton.hide(); return; }
+  if (e.target.id === 'bnew') { openBuildForm(null); return; }
+  if (e.target.id === 'bback') { leaveForm(); return; }
   const f = e.target.closest('[data-bfilter]'); if (f) { bfilter = f.dataset.bfilter; renderMain(); return; }
   const bb = e.target.closest('[data-build]'); if (bb) { openBuild(Number(bb.dataset.build)); return; }
   const a = e.target.closest('[data-badd]'); if (a) { openPicker(a.dataset.badd); return; }
@@ -1090,44 +1159,77 @@ document.addEventListener('click', e => {
     const [s, id] = pk.dataset.bpick.split(':').map(Number);
     const it = D.items.find(x => x.s === s && x.id === id);
     if (!it) return;
-    if (it.q <= 0) { toast('Этой детали нет на складе. Сначала сделайте «📥 Приход».'); return; }
-    const ex = bdraft.parts.find(p => p.s === s && p.id === id);
-    if (ex) ex.q = Math.min(ex.q + 1, it.q); else bdraft.parts.push({ s: s, id: id, q: 1 });
-    saveDraft(); closeSheet(); renderMain(); haptic('success');
+    const max = bMax(it), w = bw();
+    const ex = w.parts.find(p => p.s === s && p.id === id);
+    if (max <= (ex ? ex.q : 0)) { toast(it.q > 0 ? 'Свободных нет: остальное зарезервировано в черновиках других сборок.' : 'Этой детали нет на складе. Сначала сделайте «📥 Приход».'); return; }
+    if (ex) ex.q++; else w.parts.push({ s: s, id: id, q: 1 });
+    bsave(); closeSheet(); renderMain(); haptic('success');
     return;
   }
   const q = e.target.closest('[data-bq]');
-  if (q) { const p = bdraft.parts[Number(q.dataset.bq)]; if (p) { p.q = Math.max(1, p.q + Number(q.dataset.d)); saveDraft(); renderMain(); } return; }
+  if (q) { const p = bw().parts[Number(q.dataset.bq)]; if (p) { p.q = Math.max(1, p.q + Number(q.dataset.d)); bsave(); renderMain(); } return; }
   const rm = e.target.closest('[data-brm]');
-  if (rm) { bdraft.parts.splice(Number(rm.dataset.brm), 1); saveDraft(); renderMain(); return; }
+  if (rm) { bw().parts.splice(Number(rm.dataset.brm), 1); bsave(); renderMain(); return; }
   if (e.target.id === 'bclr') { bdraft = { parts: [], client: '', comment: '' }; saveDraft(); renderMain(); return; }
-  if (e.target.id === 'bmk') confirmBuild(false);
-  if (e.target.id === 'bsl') confirmBuild(true);
+  if (e.target.id === 'bdft') confirmBuild('draft');
+  if (e.target.id === 'bmk') confirmBuild('built');
+  if (e.target.id === 'bsl') confirmBuild('sold');
+  if (e.target.id === 'bsave') confirmBuild('edit');
+  if (e.target.id === 'bdel') confirmBuild('del');
 });
 document.addEventListener('input', e => {
-  if (e.target.id === 'bcl') { bdraft.client = e.target.value; saveDraft(); }
-  if (e.target.id === 'bcm') { bdraft.comment = e.target.value; saveDraft(); }
+  if (e.target.id === 'bcl') { bw().client = e.target.value; bsave(); }
+  if (e.target.id === 'bcm') { bw().comment = e.target.value; bsave(); }
 });
 
-function confirmBuild(sell) {
-  if (sell && !bdraft.client.trim()) { toast('Напишите клиента — кому продаёте сборку.'); const c = $('bcl'); if (c) c.focus(); return; }
-  const rows = bdraft.parts.map(p => ({ p: p, it: bItem(p) }));
-  if (rows.some(r => !r.it || r.p.q > r.it.q)) { toast('Некоторых деталей не хватает — проверьте список.'); return; }
+const partApi = r => ({ sheet: D.sheets[r.it.s].name, row: r.it.r, id: r.it.id, name: r.it.n, q: r.p.q });
+const partsList = (rows, sign) => '<div class="card" style="padding:4px 12px;background:var(--sec)">' + (() => {
   const groups = {};
   rows.forEach(r => { const l = slotOf(D.sheets[r.it.s]); (groups[l] = groups[l] || []).push(r); });
-  openSheet('<h2>' + (sell ? '🟢 Собрать и продать' : '🟡 Собрать на склад') + '</h2><div class="sub">Эти детали спишутся со склада:</div>' +
-    '<div class="card" style="padding:4px 12px;background:var(--sec)">' + slotList().filter(l => groups[l]).map(l =>
-      '<div class="kv"><span>' + esc(l) + '</span><span>' + groups[l].map(r => r.p.q + '× ' + esc(oneLine(r.it.n))).join('<br>') + '</span></div>').join('') +
-    (sell ? '<div class="kv"><span>Клиент</span><span>' + esc(bdraft.client.trim()) + '</span></div>' : '') +
-    (bdraft.comment.trim() ? '<div class="kv"><span>Комментарий</span><span>' + esc(bdraft.comment.trim()) + '</span></div>' : '') +
-    '</div><div class="btns"><button class="btn sec" data-cancel>Отмена</button><button class="btn" id="bok">✅ Подтвердить</button></div>');
+  return slotList().filter(l => groups[l]).map(l => '<div class="kv"><span>' + esc(l) + '</span><span>' + groups[l].map(r => (sign || '') + r.p.q + '× ' + esc(oneLine(r.it.n))).join('<br>') + '</span></div>').join('');
+})() + '</div>';
+
+/** mode: draft (сохранить черновик) | built (собрать на склад) | sold (собрать и продать) | edit (сохранить состав собранной) | del (удалить черновик) */
+function confirmBuild(mode) {
+  const w = bw(), isD = bedit && isDraftB(bedit);
+  const client = (w.client || '').trim(), comment = (w.comment || '').trim();
+  if (mode === 'sold' && !client) { toast('Напишите клиента — кому продаёте сборку.'); const c = $('bcl'); if (c) c.focus(); return; }
+  const rows = w.parts.map(p => ({ p: p, it: bItem(p) }));
+  if (mode !== 'del' && rows.some(r => !r.it || r.p.q > bMax(r.it))) { toast('Некоторых деталей не хватает — проверьте список.'); return; }
+  let title, body, call;
+  if (mode === 'del') {
+    title = '🗑 Удалить черновик №' + bedit.no + '?';
+    body = '<div class="sub">Со склада ничего не списано — детали просто станут свободными.</div>';
+    call = () => api('builddel', { no: bedit.no });
+  } else if (mode === 'edit') {
+    // разница «было → стало»
+    const diff = {};
+    bedit.orig.forEach(p => { const k = p.s + ':' + p.id; diff[k] = (diff[k] || 0) - p.q; });
+    w.parts.forEach(p => { const k = p.s + ':' + p.id; diff[k] = (diff[k] || 0) + p.q; });
+    const back = [], take = [];
+    Object.keys(diff).forEach(k => { const [s, id] = k.split(':').map(Number), it = bItem({ s: s, id: id }); if (!it || !diff[k]) return; (diff[k] > 0 ? take : back).push({ p: { q: Math.abs(diff[k]) }, it: it }); });
+    title = '💾 Сохранить состав сборки №' + bedit.no;
+    body = (!back.length && !take.length ? '<div class="sub">Состав не изменился' + (comment !== (bedit.comment || '').trim() ? ' — сохранится только комментарий.' : '.') + '</div>' : '') +
+      (back.length ? '<div class="sub">↩️ Вернётся на склад:</div>' + partsList(back, '+') : '') +
+      (take.length ? '<div class="sub" style="margin-top:10px">📤 Спишется со склада:</div>' + partsList(take, '−') : '');
+    call = () => api('buildedit', { no: bedit.no, comment: comment, parts: rows.map(partApi) });
+  } else {
+    title = mode === 'draft' ? '📝 ' + (isD ? 'Сохранить черновик №' + bedit.no : 'Сохранить черновик') : mode === 'sold' ? '🟢 Собрать и продать' : '🟡 Собрать на склад';
+    body = '<div class="sub">' + (mode === 'draft' ? 'Эти детали будут зарезервированы (со склада пока не спишутся):' : 'Эти детали спишутся со склада:') + '</div>' + partsList(rows) +
+      (mode === 'sold' ? '<div class="kv"><span>Клиент</span><span>' + esc(client) + '</span></div>' : '') +
+      (comment ? '<div class="kv"><span>Комментарий</span><span>' + esc(comment) + '</span></div>' : '');
+    const parts = rows.map(partApi);
+    if (isD) call = mode === 'draft' ? () => api('buildedit', { no: bedit.no, client: client, comment: comment, parts: parts })
+      : () => api('buildfinish', { no: bedit.no, sell: mode === 'sold', client: client, comment: comment, parts: parts });
+    else call = () => api('build', { draft: mode === 'draft', sell: mode === 'sold', client: client, comment: comment, parts: parts });
+  }
+  openSheet('<h2>' + title + '</h2>' + body +
+    '<div class="btns"><button class="btn sec" data-cancel>Отмена</button><button class="btn" id="bok">✅ ' + (mode === 'del' ? 'Удалить' : 'Подтвердить') + '</button></div>');
   $('bok').addEventListener('click', () => busy($('bok'), async () => {
-    const j = await api('build', { sell: sell, client: bdraft.client.trim(), comment: bdraft.comment.trim(),
-      parts: rows.map(r => ({ sheet: D.sheets[r.it.s].name, row: r.it.r, id: r.it.id, name: r.it.n, q: r.p.q })) });
-    bdraft = { parts: [], client: '', comment: '' }; saveDraft();
-    bview = 'list'; bfilter = sell ? 'sold' : 'built';
-    closeSheet(); if (tg) tg.BackButton.hide(); haptic('success'); toast(j.message, 6000);
-    renderMain();
+    const j = await call();
+    if (!bedit) { bdraft = { parts: [], client: '', comment: '' }; saveDraft(); }
+    closeSheet(); haptic('success'); toast(j.message, 6000);
+    leaveForm(mode === 'del' ? null : mode === 'edit' ? 'built' : mode);
     await refresh(true);
   }));
 }
@@ -1141,16 +1243,22 @@ function openBuild(no) {
   if (tg) tg.BackButton.show();
 }
 function renderBuild() {
-  const b = curBuild;
+  const b = curBuild, [k, l] = bStatus(b);
   let h = (tg && tg.initData ? '' : '<button class="back" data-close>← Назад</button>') +
-    '<div class="card"><div class="title">Сборка №' + b.no + ' <span class="st ' + (isSold(b) ? 'sold">Продан' : 'built">Собран') + '</span></div>' +
-    '<div class="kv"><span>Собрал</span><span>' + esc(b.by) + ' · ' + fmtDate(b.d) + '</span></div>' +
-    (isSold(b) ? '<div class="kv"><span>Клиент</span><span>' + esc(b.cl) + '</span></div><div class="kv"><span>Продал</span><span>' + esc(b.sb) + ' · ' + fmtDate(b.sd) + '</span></div>' : '') +
+    '<div class="card"><div class="title">Сборка №' + b.no + ' <span class="st ' + k + '">' + l + '</span></div>' +
+    '<div class="kv"><span>' + (isDraftB(b) ? 'Начал' : 'Собрал') + '</span><span>' + esc(b.by) + ' · ' + fmtDate(b.d) + '</span></div>' +
+    (isSold(b) ? '<div class="kv"><span>Клиент</span><span>' + esc(b.cl) + '</span></div><div class="kv"><span>Продал</span><span>' + esc(b.sb) + ' · ' + fmtDate(b.sd) + '</span></div>'
+      : b.cl ? '<div class="kv"><span>Клиент</span><span>' + esc(b.cl) + '</span></div>' : '') +
     (b.cm ? '<div class="kv"><span>Комментарий</span><span style="white-space:pre-line">' + esc(b.cm) + '</span></div>' : '') + '</div>';
-  if (!isSold(b) && canEdit()) h += '<div class="ops"><button class="op wide" data-bsell style="background:var(--ok);color:#fff">🟢 Продать эту сборку</button></div>';
-  h += '<h3>Состав</h3><div class="card">' + b.parts.map(p => '<div class="kv"><span>' + esc(p.l) + '</span><span style="white-space:pre-line">' + esc(p.t) + '</span></div>').join('') + '</div>';
+  if (isDraftB(b)) h += '<div class="note">📝 Черновик: детали зарезервированы, со склада ещё не списаны.</div>';
+  if (!isSold(b) && canEdit()) {
+    h += '<div class="ops">' + (isDraftB(b) ? '<button class="op wide" data-bedit>✏️ Открыть черновик (изменить, собрать, удалить)</button>'
+      : '<button class="op wide" data-bedit>✏️ Изменить состав</button><button class="op wide" data-bsell style="background:var(--ok);color:#fff">🟢 Продать эту сборку</button>') + '</div>';
+  }
+  h += '<h3>Состав</h3><div class="card">' + (b.parts.length ? b.parts.map(p => '<div class="kv"><span>' + esc(p.l) + '</span><span style="white-space:pre-line">' + esc(p.t) + '</span></div>').join('') : '<div class="sub" style="margin:0">Пусто</div>') + '</div>';
   $('page').innerHTML = h;
 }
+$('page').addEventListener('click', e => { if (e.target.closest('[data-bedit]') && curBuild) openBuildForm(curBuild); });
 function openBuildSell() {
   const b = curBuild; if (!b) return;
   openSheet('<h2>🟢 Продать сборку №' + b.no + '</h2><div class="sub">Детали уже списаны при сборке — сейчас меняется только статус.</div>' +
