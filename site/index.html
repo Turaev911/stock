@@ -122,6 +122,20 @@
   .q.low { background: rgba(224,138,0,.15); color: var(--warn); } .q.zero { background: rgba(120,130,125,.15); color: var(--hint); }
   .tag { flex: none; font-size: 12px; font-weight: 650; padding: 4px 10px; border-radius: 10px; }
   .tag.built { background: rgba(224,138,0,.15); color: var(--warn); } .tag.sold { background: rgba(23,105,209,.12); color: var(--green); }
+  .tag.draft { background: rgba(120,90,220,.14); color: #6a4bd6; }
+  /* сборки: карточки кликабельны, окно правки состава */
+  .bcard { cursor: pointer; }
+  #det .bbox { max-width: 640px; }
+  .bpart { display: flex; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .bpart .t { flex: 1; min-width: 0; } .bpart .n { font-size: 14px; word-break: break-word; } .bpart .m { font-size: 12px; color: var(--hint); margin-top: 2px; } .bpart .m.bad { color: var(--bad); }
+  .bmini { display: flex; align-items: center; gap: 4px; flex: none; }
+  .bmini button { width: 32px; height: 32px; border-radius: 50%; background: rgba(255,255,255,.85); border: 1px solid var(--line); font-size: 17px; line-height: 1; }
+  .bmini b { min-width: 26px; text-align: center; }
+  .bsr { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; max-height: 260px; overflow-y: auto; }
+  .bpick { display: flex; gap: 10px; align-items: center; text-align: left; padding: 8px 10px; border-radius: 14px; background: rgba(255,255,255,.7); border: 1px solid var(--line); }
+  .bpick:hover { border-color: var(--accent); } .bpick.off { opacity: .45; }
+  .bpick .t { flex: 1; min-width: 0; display: flex; flex-direction: column; } .bpick .n { font-size: 14px; } .bpick .m { font-size: 12px; color: var(--hint); }
+  #det .bbtns { flex-wrap: wrap; } #det .bbtns .pbtn, #det .bbtns .sbtn { min-width: 160px; }
 
   .minis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
   .mini { border-radius: 18px; padding: 14px; background: linear-gradient(160deg, #e4f0ff, #f6f9ff); border: 1px solid rgba(255,255,255,.8); text-align: left; transition: transform .25s; display: flex; flex-direction: column; gap: 4px; }
@@ -443,6 +457,11 @@ function openDet(idx) {
 function refreshDet() {
   if (detMode === 'card') renderDet();
   else if (detMode === 'op') { if (!curItem()) closeDet(); else updOp(); }
+  else if (detMode === 'bcard') renderBCard();
+  else if (sb && sb.no && /^b(edit|conf)$/.test(detMode) && !bBusy) {   // открытую на правку сборку изменили на другом экране
+    const b = (D.builds || []).find(x => x.no === sb.no);
+    if (!b || isSoldB(b) || isDraftBS(b) !== isDraftBS(sb)) { closeDet(); toast('Сборку изменили на другом экране — откройте её заново.'); }
+  }
 }
 function renderDet() {
   const it = curItem(); if (!it) { closeDet(); return; }
@@ -455,6 +474,8 @@ function renderDet() {
     '<div class="dt">' + esc(it.n) + '</div><div class="sub" style="margin-bottom:12px">' + esc(sh.name.trim()) + ' · ID ' + it.id + '</div>' +
     '<div class="dq"><span class="big ' + qcls(it.q) + '"><span>' + (it.q > 0 ? it.q : 0) + '</span><small>шт. ' + (it.q > 0 ? 'в наличии' : 'нет в наличии') + '</small></span></div>' +
     '<div class="sub">Продано за 30 дней: <b>' + it.s30 + '</b> · за 60 дней: <b>' + it.s60 + '</b></div>' +
+    (() => { const r = rsvByS(it); return r.length ? '<div class="sub" style="margin-top:6px;color:#6a4bd6">📝 В черновиках сборок: ' + r.map(x => '№' + x.no + ' — ' + x.q + ' шт.').join(', ') +
+      ' · свободно ' + Math.max(0, it.q - r.reduce((s, x) => s + x.q, 0)) + ' шт.</div>' : ''; })() +
     (opBusy ? '<div class="pend">⏳ Записываю в таблицу…</div>' : '') +
     (invRecOf(it) ? '<div class="sub" style="margin-top:8px">Инвентаризация' + (invE(it) ? '' : ' (завершена)') + ': ' + (it.ck ? '<span class="ivtag">✔ проверен</span>' : '<span class="ivtag wait">⏳ ещё не проверен</span>') +
       (!it.ck && canEdit() && invE(it) ? ' <button class="ivok" data-ivok="' + idx + '" style="margin-left:6px">✔ Всё верно, ' + Math.max(0, it.q) + ' шт.</button>' : '') + '</div>' : '') +
@@ -464,7 +485,7 @@ function renderDet() {
     '<button class="chip" id="cp" style="margin-top:14px">📋 Скопировать название</button></div>';
   $('cp').addEventListener('click', () => copyName(idx));
 }
-function closeDet() { $('det').classList.add('hidden'); detKey = null; detMode = ''; }
+function closeDet() { $('det').classList.add('hidden'); detKey = null; detMode = ''; sb = null; bNo = 0; }
 
 /* ---------- изменение остатка с сайта (тот же путь, что в мини-приложении: проверка, запись в таблицу и «Журнал») ---------- */
 function openOp(code) {
@@ -488,9 +509,12 @@ function updOp() {
   const it = curItem(); if (!it || !$('opq')) return;
   const op = OPS[detOp], q = Math.floor(Number($('opq').value));
   const ok = q >= 0 && (detOp === 'cnt' || q > 0), after = op.sign === 0 ? q : it.q + op.sign * q;
-  $('opp').innerHTML = ok ? 'Остаток: <b>' + it.q + '</b> → <b' + (after < 0 ? ' style="color:var(--bad)"' : '') + '>' + after + '</b> шт.' +
-    (after < 0 ? '<br><span style="color:var(--bad)">На складе только ' + it.q + ' шт.</span>' : '') : '';
-  $('opok').disabled = !ok || after < 0 || opBusy;
+  const rb = op.sign < 0 ? rsvByS(it) : [], rsv = rb.reduce((s, x) => s + x.q, 0);   // детали в черновиках сборок продавать/списывать нельзя
+  const lock = after >= 0 && rsv > 0 && after < rsv;
+  $('opp').innerHTML = ok ? 'Остаток: <b>' + it.q + '</b> → <b' + (after < 0 || lock ? ' style="color:var(--bad)"' : '') + '>' + after + '</b> шт.' +
+    (after < 0 ? '<br><span style="color:var(--bad)">На складе только ' + it.q + ' шт.</span>' : '') +
+    (lock ? '<br><span style="color:var(--bad)">' + rsv + ' шт. зарезервировано в черновиках сборок (' + rb.map(x => '№' + x.no).join(', ') + '). Свободно: ' + Math.max(0, it.q - rsv) + ' шт.</span>' : '') : '';
+  $('opok').disabled = !ok || after < 0 || lock || opBusy;
 }
 /* Остаток меняется на экране СРАЗУ (не ждём таблицу); если запись не прошла — возвращаем прежнее число и говорим об ошибке. */
 async function doOp() {
@@ -741,7 +765,7 @@ function homeHtml() {
         esc(o.who) + (o.cl ? ' · ' + esc(o.cl) : '') + ' · ' + esc(o.ago) + '</div></div></div>').join('') + '</div></div>' +
 
     '<div class="card c7"><h3>Последние сборки<span>серверы</span></h3><div class="minis">' +
-      X.builds.slice(0, 3).map(b => '<button class="mini" data-p="builds"><span class="tag ' + (/продан/i.test(b.st) ? 'sold' : 'built') + '" style="align-self:flex-start">' + esc(b.st) + '</span><b>№' + b.no + ' ' + esc(b.p) + '</b><span>' + esc(b.n) + '</span></button>').join('') + '</div></div>' +
+      X.builds.slice(0, 3).map(b => '<button class="mini" data-p="builds"><span class="tag ' + (/продан/i.test(b.st) ? 'sold' : /черновик/i.test(b.st) ? 'draft' : 'built') + '" style="align-self:flex-start">' + esc(b.st) + '</span><b>№' + b.no + ' ' + esc(b.p) + '</b><span>' + esc(b.n) + '</span></button>').join('') + '</div></div>' +
     '<div class="card dark c5"><h3>Заканчивается<span style="color:rgba(255,255,255,.6)">' + X.low.length + ' поз.</span></h3><div class="list">' +
       (X.low.slice(0, 4).map(i => '<div class="it" style="border-color:rgba(255,255,255,.1)"><div class="t"><div class="n">' + esc(oneLine(i.n)) + '</div><div class="m" style="color:rgba(255,255,255,.55)">' + esc(X.sheetName(i)) + '</div></div><span class="q low">' + i.q + '</span></div>').join('') || '<div class="sub">Всё в достатке 🎉</div>') +
     '</div><button class="btn" data-p="low" style="margin-top:12px">Показать все</button></div>' +
@@ -781,11 +805,226 @@ function lowHtml() {
     '<div class="card c6"><h3>Закончились, но продавались<span>' + out.length + ' поз.</span></h3><div class="list">' +
     (out.map(rowHtml).join('') || '<div class="empty">Нет таких</div>') + '</div></div></div>';
 }
-function buildsHtml() {
-  return '<div class="grid">' + X.builds.map(b => '<div class="card c4"><h3>Сборка №' + b.no + '<span class="tag ' + (/продан/i.test(b.st) ? 'sold' : 'built') + '">' + esc(b.st) + '</span></h3>' +
-    '<div class="part"><span>Платформа</span><span>' + esc(b.p) + '</span></div><div class="part"><span>Состав</span><span>' + esc(b.n) + '</span></div>' +
-    '<div class="part"><span>Собрал</span><span>' + esc(b.who) + '</span></div>' + (b.cl ? '<div class="part"><span>Клиент</span><span>' + esc(b.cl) + '</span></div>' : '') + '</div>').join('') + '</div>';
+/* ---------- сборки: черновик → собран → продан (то же, что в мини-приложении) ----------
+   Черновик — детали только зарезервированы (со склада не списаны), состав можно менять.
+   Собран — детали списаны, сервер стоит на складе; состав можно менять: снятая деталь вернётся на склад, добавленная спишется.
+   Продан — состав закрыт. */
+const SLOT_RE = [['Платформа', /server|сервер|платформ/i], ['Процессор', /cpu|процессор/i], ['Память', /^\s*ram|памят|memory/i],
+  ['SSD', /ssd|nvme/i], ['HDD', /hdd/i], ['Сеть / FC', /network|сет|nic|\bfc\b/i], ['RAID', /raid/i], ['Блок питания', /psu|блок/i],
+  ['GPU', /gpu|видео/i], ['Охлаждение', /heatsink|fan|радиат|вентил|кулер/i], ['Корзина', /cage|корзин/i], ['Прочее', /[\s\S]*/]];
+const slotOfS = sh => sh.slot || SLOT_RE.find(s => s[1].test(sh.name))[0];
+const slotListS = () => D.slots || SLOT_RE.map(s => s[0]);
+const isSoldB = b => /продан/i.test(b.st), isDraftBS = b => /черновик/i.test(b.st);
+const bStat = b => isDraftBS(b) ? ['draft', 'Черновик'] : isSoldB(b) ? ['sold', 'Продан'] : ['built', 'Собран'];
+const ikeyS = it => D.sheets[it.s].name.trim() + '|' + it.id;
+const bItemS = p => D.items.find(x => x.s === p.s && x.id === p.id);
+const fmtD = s => { if (!s) return ''; const d = new Date(s); return isNaN(d) ? String(s) : d.toLocaleDateString('ru-RU') + ' ' + d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' }); };
+function rsvMapS(exceptNo) {
+  const m = {};
+  (D.builds || []).forEach(b => { if (isDraftBS(b) && b.no !== exceptNo) (b.items || []).forEach(p => { const k = p.s + '|' + p.i; m[k] = (m[k] || 0) + p.q; }); });
+  return m;
 }
+function rsvByS(it) {
+  const k = ikeyS(it), out = [];
+  (D.builds || []).forEach(b => { if (isDraftBS(b)) (b.items || []).forEach(p => { if (p.s + '|' + p.i === k) out.push({ no: b.no, q: p.q }); }); });
+  return out;
+}
+let bFilter = 'built', sb = null, bNo = 0, bBusy = false;   // фильтр списка; рабочая сборка в окне; номер открытой карточки
+function bMaxS(it) {
+  const own = sb && sb.no && isDraftBS(sb) ? sb.no : 0;
+  const free = it.q - (rsvMapS(own)[ikeyS(it)] || 0);
+  if (sb && sb.no && !isDraftBS(sb)) { const o = sb.orig.find(p => p.s === it.s && p.id === it.id); return free + (o ? o.q : 0); }
+  return free;
+}
+
+function buildsHtml() {
+  if (!D.builds) return '<div class="grid">' + X.builds.map(b => '<div class="card c4"><h3>Сборка №' + b.no + '<span class="tag ' + (/продан/i.test(b.st) ? 'sold' : 'built') + '">' + esc(b.st) + '</span></h3>' +
+    '<div class="part"><span>Платформа</span><span>' + esc(b.p) + '</span></div><div class="part"><span>Состав</span><span>' + esc(b.n) + '</span></div></div>').join('') + '</div>';
+  const B = D.builds, n = { draft: 0, built: 0, sold: 0 };
+  B.forEach(b => n[bStat(b)[0]]++);
+  const list = B.filter(b => bFilter === 'all' || bStat(b)[0] === bFilter);
+  let h = '<div class="grid"><div class="c12"><div class="chips" style="margin:0;align-items:center">' +
+    [['draft', 'Черновики', n.draft], ['built', 'На складе', n.built], ['sold', 'Проданы', n.sold], ['all', 'Все', B.length]].map(([k, l, c]) =>
+      '<button class="chip' + (bFilter === k ? ' on' : '') + '" data-bfl="' + k + '">' + l + ' <small>' + c + '</small></button>').join('') +
+    (canEdit() ? '<button class="pbtn" data-bnew style="flex:none;height:40px;padding:0 18px;margin-left:auto">＋ Новая сборка</button>' : '') + '</div></div>';
+  if (!list.length) return h + '<div class="card c12"><div class="empty">' + (B.length ? 'Здесь пусто' : 'Сборок пока нет. Нажмите «＋ Новая сборка».') + '</div></div></div>';
+  return h + list.map(b => {
+    const m = mapBuild(b), [k, l] = bStat(b);
+    return '<div class="card c4 bcard" data-bno="' + b.no + '" role="button" tabindex="0"><h3>Сборка №' + b.no + '<span class="tag ' + k + '">' + l + '</span></h3>' +
+      '<div class="part"><span>Платформа</span><span>' + esc(m.p) + '</span></div><div class="part"><span>Состав</span><span>' + esc(m.n) + '</span></div>' +
+      '<div class="part"><span>' + (isDraftBS(b) ? 'Начал' : 'Собрал') + '</span><span>' + esc(b.by) + '</span></div>' + (b.cl ? '<div class="part"><span>Клиент</span><span>' + esc(b.cl) + '</span></div>' : '') + '</div>';
+  }).join('') + '</div>';
+}
+
+/* карточка сборки */
+function openBCard(no) { bNo = no; sb = null; detKey = null; detMode = 'bcard'; renderBCard(); $('det').classList.remove('hidden'); }
+function renderBCard() {
+  const b = (D.builds || []).find(x => x.no === bNo); if (!b) { closeDet(); return; }
+  const [k, l] = bStat(b);
+  $('det').innerHTML = '<div class="card box"><button class="x" data-close aria-label="Закрыть">✕</button>' +
+    '<div class="dt">Сборка №' + b.no + ' <span class="tag ' + k + '" style="vertical-align:middle">' + l + '</span></div>' +
+    '<div class="part"><span>' + (isDraftBS(b) ? 'Начал' : 'Собрал') + '</span><span>' + esc(b.by) + ' · ' + fmtD(b.d) + '</span></div>' +
+    (isSoldB(b) ? '<div class="part"><span>Клиент</span><span>' + esc(b.cl) + '</span></div><div class="part"><span>Продал</span><span>' + esc(b.sb) + ' · ' + fmtD(b.sd) + '</span></div>'
+      : b.cl ? '<div class="part"><span>Клиент</span><span>' + esc(b.cl) + '</span></div>' : '') +
+    (b.cm ? '<div class="part"><span>Комментарий</span><span>' + esc(b.cm) + '</span></div>' : '') +
+    (isDraftBS(b) ? '<div class="sub" style="margin-top:10px;color:#6a4bd6">📝 Черновик: детали зарезервированы, со склада ещё не списаны.</div>' : '') +
+    '<h4>Состав</h4>' + (b.parts.map(p => '<div class="part"><span>' + esc(p.l) + '</span><span>' + esc(p.t) + '</span></div>').join('') || '<div class="sub">Пусто</div>') +
+    (!isSoldB(b) && canEdit() ? '<div class="btns">' + (isDraftBS(b) ? '<button class="pbtn" data-bed>Открыть черновик</button>'
+      : '<button class="sbtn" data-bed>Изменить состав</button><button class="pbtn" data-bsell>Продать</button>') + '</div>' : '') + '</div>';
+}
+
+/* окно правки: новая сборка / черновик / собранная */
+function openBEdit(b) {
+  if (b) {
+    const parts = (b.items || []).map(p => ({ s: D.sheets.findIndex(sh => sh.name.trim() === p.s), id: p.i, q: p.q })).filter(p => p.s >= 0);
+    sb = { no: b.no, st: b.st, parts: parts.map(p => Object.assign({}, p)), orig: parts, client: b.cl || '', comment: b.cm || '' };
+  } else sb = { no: 0, st: '', parts: [], orig: [], client: '', comment: '' };
+  detKey = null; detMode = 'bedit'; renderBEdit(); $('det').classList.remove('hidden');
+}
+function renderBEdit() {
+  const w = sb, isB = w.no && !isDraftBS(w), isD = w.no && isDraftBS(w);
+  const total = w.parts.reduce((s, p) => s + p.q, 0);
+  let bad = false;
+  const rows = slotListS().map(label => {
+    const mine = w.parts.map((p, i) => ({ p: p, i: i })).filter(x => { const it = bItemS(x.p); return it ? slotOfS(D.sheets[it.s]) === label : label === 'Прочее'; });
+    if (!mine.length) return '';
+    return '<h4>' + esc(label) + '</h4>' + mine.map(({ p, i }) => {
+      const it = bItemS(p), max = it ? bMaxS(it) : 0, over = !it || p.q > max; if (over) bad = true;
+      return '<div class="bpart"><div class="t"><div class="n">' + esc(it ? oneLine(it.n) : 'Товар не найден — удалите строку') + '</div>' +
+        '<div class="m' + (over ? ' bad' : '') + '">' + (it ? esc(D.sheets[it.s].name.trim()) + ' · ID ' + it.id + ' · на складе ' + it.q + (over ? ' — не хватает!' : '') : '') + '</div></div>' +
+        '<div class="bmini"><button data-bq="' + i + '" data-d="-1" aria-label="Меньше">−</button><b>' + p.q + '</b><button data-bq="' + i + '" data-d="1" aria-label="Больше">+</button>' +
+        '<button data-brm="' + i + '" title="Убрать" aria-label="Убрать">✕</button></div></div>';
+    }).join('');
+  }).join('');
+  const dis = (!total || bad || bBusy) ? ' disabled' : '';
+  let btns;
+  if (isB) btns = '<button class="sbtn" data-close>Отмена</button><button class="pbtn" data-bact="edit"' + dis + '>Сохранить состав</button>';
+  else btns = '<button class="sbtn" data-bact="draft"' + dis + '>📝 ' + (isD ? 'Сохранить черновик' : 'Сохранить как черновик') + '</button>' +
+    '<button class="pbtn" data-bact="built"' + dis + '>Собрать на склад</button><button class="pbtn" data-bact="sold"' + dis + ' style="background:var(--green)">Собрать и продать</button>';
+  $('det').innerHTML = '<div class="card box bbox"><button class="x" data-close aria-label="Закрыть">✕</button>' +
+    '<div class="dt">' + (isB ? 'Изменить состав сборки №' + w.no : isD ? 'Черновик сборки №' + w.no : 'Новая сборка') + '</div>' +
+    '<div class="sub" style="margin-bottom:10px">' + (isB ? 'Сборка уже собрана. Уберёте деталь — она <b>вернётся на склад</b>; добавите — <b>спишется</b>. Всё запишется в «Журнал».'
+      : 'Черновик: детали только <b>резервируются</b> (их не продадут отдельно), со склада спишутся, когда нажмёте «Собрать». Состав можно менять сколько угодно.') + '</div>' +
+    '<div class="lbl">Добавить деталь</div><input id="bsq" class="inp" type="search" placeholder="Модель, P/N, объём…" autocomplete="off"><div id="bsr" class="bsr"></div>' +
+    (rows || '<div class="empty" style="padding:18px 0">Деталей пока нет — найдите их через поиск выше.</div>') +
+    (isB ? '' : '<div class="lbl">Клиент (обязательно, если продаёте сразу)</div><input id="bcl" class="inp" maxlength="200" autocomplete="off" value="' + esc(w.client) + '">') +
+    '<div class="lbl">Комментарий (необязательно)</div><input id="bcm" class="inp" maxlength="500" autocomplete="off" value="' + esc(w.comment) + '">' +
+    '<div class="preview">Деталей в сборке: <b>' + total + '</b> шт.' + (bad ? '<br><span style="color:var(--bad)">Некоторых деталей не хватает на складе.</span>' : '') + '</div>' +
+    '<div class="btns bbtns">' + btns + '</div>' + (isD ? '<button class="sbtn" data-bact="del" style="width:100%;margin-top:10px;flex:none">🗑 Удалить черновик</button>' : '') + '</div>';
+  $('bsq').addEventListener('input', drawBSearch);
+}
+function drawBSearch() {
+  const box = $('bsr'), tokens = norm($('bsq').value).split(' ').filter(Boolean);
+  if (!tokens.length) { box.innerHTML = ''; return; }
+  const hits = D.items.filter(it => { const h = norm(D.sheets[it.s].name + ' ' + (it.v || []).join(' ') + ' ' + it.n), hc = h.replace(/[\s\-\/.]/g, '');
+    return tokens.every(t => h.indexOf(t) >= 0 || (t.length >= 4 && hc.indexOf(t.replace(/[\-\/.]/g, '')) >= 0)); })
+    .map(it => ({ it: it, f: bMaxS(it) })).sort((a, b) => (b.f > 0) - (a.f > 0) || b.it.s60 - a.it.s60);
+  box.innerHTML = hits.length ? hits.slice(0, 30).map(({ it, f }) => '<button class="bpick' + (f > 0 ? '' : ' off') + '" data-bpick="' + it.s + ':' + it.id + '"><span class="t"><span class="n">' + esc(oneLine(it.n)) + '</span>' +
+    '<span class="m">' + esc(D.sheets[it.s].name.trim()) + ' · ID ' + it.id + (f < it.q ? ' · свободно ' + Math.max(0, f) + ' из ' + it.q : '') + '</span></span><span class="q ' + qcls(f) + '">' + Math.max(0, f) + '</span></button>').join('') +
+    (hits.length > 30 ? '<div class="sub" style="text-align:center;padding:6px">Показано 30 из ' + hits.length + ' — уточните поиск</div>' : '')
+    : '<div class="sub" style="padding:8px 2px">Ничего не найдено. Если детали нет в таблице — сначала добавьте её («Склад» → «＋ Новый товар»).</div>';
+}
+
+/* подтверждение: что спишется / вернётся */
+const bPartRows = (rows, sign) => rows.map(r => '<div class="part"><span>' + esc(slotOfS(D.sheets[r.it.s])) + '</span><span>' + (sign || '') + r.q + '× ' + esc(oneLine(r.it.n)) + '</span></div>').join('');
+function askBAct(mode) {
+  const w = sb, isD = w.no && isDraftBS(w);
+  const client = (w.client || '').trim(), comment = (w.comment || '').trim();
+  if (mode === 'sold' && !client) { toast('Напишите клиента — кому продаёте сборку.'); const c = $('bcl'); if (c) c.focus(); return; }
+  const rows = w.parts.map(p => ({ q: p.q, p: p, it: bItemS(p) }));
+  if (mode !== 'del' && rows.some(r => !r.it || r.q > bMaxS(r.it))) { toast('Некоторых деталей не хватает — проверьте список.'); return; }
+  const parts = rows.map(r => ({ sheet: D.sheets[r.it.s].name, row: r.it.r, id: r.it.id, name: r.it.n, q: r.q }));
+  let title, body, req, ok = 'Подтвердить';
+  if (mode === 'del') { title = 'Удалить черновик №' + w.no + '?'; body = '<div class="sub">Со склада ничего не списано — детали просто станут свободными.</div>'; req = { action: 'builddel', no: w.no }; ok = 'Удалить'; }
+  else if (mode === 'edit') {
+    const diff = {};
+    w.orig.forEach(p => { const k = p.s + ':' + p.id; diff[k] = (diff[k] || 0) - p.q; });
+    w.parts.forEach(p => { const k = p.s + ':' + p.id; diff[k] = (diff[k] || 0) + p.q; });
+    const back = [], take = [];
+    Object.keys(diff).forEach(k => { const [s, id] = k.split(':').map(Number), it = bItemS({ s: s, id: id }); if (it && diff[k]) (diff[k] > 0 ? take : back).push({ q: Math.abs(diff[k]), it: it }); });
+    title = 'Сохранить состав сборки №' + w.no;
+    body = (!back.length && !take.length ? '<div class="sub">Состав не изменился.</div>' : '') +
+      (back.length ? '<h4>↩️ Вернётся на склад</h4>' + bPartRows(back, '+') : '') + (take.length ? '<h4>📤 Спишется со склада</h4>' + bPartRows(take, '−') : '');
+    req = { action: 'buildedit', no: w.no, comment: comment, parts: parts };
+  } else {
+    title = mode === 'draft' ? (isD ? 'Сохранить черновик №' + w.no : 'Сохранить черновик') : mode === 'sold' ? 'Собрать и продать' : 'Собрать на склад';
+    body = '<div class="sub">' + (mode === 'draft' ? 'Эти детали будут зарезервированы (со склада пока не спишутся):' : 'Эти детали спишутся со склада:') + '</div>' + bPartRows(rows) +
+      (mode === 'sold' ? '<div class="part"><span>Клиент</span><span>' + esc(client) + '</span></div>' : '') + (comment ? '<div class="part"><span>Комментарий</span><span>' + esc(comment) + '</span></div>' : '');
+    req = isD ? (mode === 'draft' ? { action: 'buildedit', no: w.no, client: client, comment: comment, parts: parts }
+      : { action: 'buildfinish', no: w.no, sell: mode === 'sold', client: client, comment: comment, parts: parts })
+      : { action: 'build', draft: mode === 'draft', sell: mode === 'sold', client: client, comment: comment, parts: parts };
+  }
+  detMode = 'bconf'; sb.req = req; sb.mode = mode;
+  $('det').innerHTML = '<div class="card box"><button class="x" data-close aria-label="Закрыть">✕</button><div class="dt">' + title + '</div>' + body +
+    '<div class="btns"><button class="sbtn" data-bback>Назад</button><button class="pbtn" data-bgo>' + ok + '</button></div></div>';
+}
+async function doBAct() {
+  const b = document.querySelector('[data-bgo]'); if (!b || b.disabled || !sb || !sb.req) return;
+  b.disabled = true; b.textContent = 'Записываю…'; bBusy = true;
+  try {
+    const j = await api(Object.assign({ token: getToken() }, sb.req));
+    const mode = sb.mode;
+    bBusy = false; closeDet(); sb = null; toast(j.message);
+    if (mode !== 'del') bFilter = mode === 'edit' ? 'built' : mode;
+    await load(true);
+  } catch (e) {
+    bBusy = false;
+    if (e.code === 'auth') { setToken(''); closeDet(); showLogin(e.message); return; }
+    b.disabled = false; b.textContent = 'Повторить'; toast('⚠️ ' + e.message);
+  }
+}
+function openBSell() {
+  const b = (D.builds || []).find(x => x.no === bNo); if (!b) return;
+  detMode = 'bsell';
+  $('det').innerHTML = '<div class="card box"><button class="x" data-close aria-label="Закрыть">✕</button><div class="dt">Продать сборку №' + b.no + '</div>' +
+    '<div class="sub">Детали уже списаны при сборке — сейчас меняется только статус.</div>' +
+    '<div class="lbl">Клиент</div><input id="bscl" class="inp" maxlength="200" autocomplete="off">' +
+    '<div class="lbl">Комментарий (необязательно)</div><input id="bscm" class="inp" maxlength="500" autocomplete="off">' +
+    '<div class="btns"><button class="sbtn" data-bcard>Назад</button><button class="pbtn" data-bsgo>Продано</button></div></div>';
+  $('bscl').focus();
+}
+async function doBSell() {
+  const b = document.querySelector('[data-bsgo]'); if (!b || b.disabled) return;
+  const client = $('bscl').value.trim(); if (!client) { toast('Напишите клиента.'); $('bscl').focus(); return; }
+  b.disabled = true; b.textContent = 'Записываю…';
+  try {
+    const j = await api({ action: 'buildsell', token: getToken(), no: bNo, client: client, comment: $('bscm').value.trim() });
+    closeDet(); toast(j.message); bFilter = 'sold'; await load(true);
+  } catch (e) {
+    if (e.code === 'auth') { setToken(''); closeDet(); showLogin(e.message); return; }
+    b.disabled = false; b.textContent = 'Повторить'; toast('⚠️ ' + e.message);
+  }
+}
+document.addEventListener('click', e => {
+  if (!D) return;
+  const fl = e.target.closest('[data-bfl]'); if (fl) { bFilter = fl.dataset.bfl; render(); return; }
+  if (e.target.closest('[data-bnew]')) { openBEdit(null); return; }
+  const bc = e.target.closest('[data-bno]'); if (bc && !e.target.closest('#det')) { openBCard(Number(bc.dataset.bno)); return; }
+  if (e.target.closest('[data-bed]')) { const b = (D.builds || []).find(x => x.no === bNo); if (b) openBEdit(b); return; }
+  if (e.target.closest('[data-bsell]')) { openBSell(); return; }
+  if (e.target.closest('[data-bcard]')) { detMode = 'bcard'; renderBCard(); return; }
+  if (e.target.closest('[data-bsgo]')) { doBSell(); return; }
+  if (!sb) return;
+  const pk = e.target.closest('[data-bpick]');
+  if (pk) {
+    const [s, id] = pk.dataset.bpick.split(':').map(Number), it = D.items.find(x => x.s === s && x.id === id); if (!it) return;
+    const ex = sb.parts.find(p => p.s === s && p.id === id);
+    if (bMaxS(it) <= (ex ? ex.q : 0)) { toast(it.q > 0 ? 'Свободных нет: остальное зарезервировано в черновиках других сборок.' : 'Этой детали нет на складе. Сначала сделайте «Приход».'); return; }
+    if (ex) ex.q++; else sb.parts.push({ s: s, id: id, q: 1 });
+    renderBEdit(); const q = $('bsq'); if (q) q.focus();
+    return;
+  }
+  const q = e.target.closest('[data-bq]'); if (q) { const p = sb.parts[Number(q.dataset.bq)]; if (p) { p.q = Math.max(1, p.q + Number(q.dataset.d)); renderBEdit(); } return; }
+  const rm = e.target.closest('[data-brm]'); if (rm) { sb.parts.splice(Number(rm.dataset.brm), 1); renderBEdit(); return; }
+  const act = e.target.closest('[data-bact]'); if (act && !act.disabled) { askBAct(act.dataset.bact); return; }
+  if (e.target.closest('[data-bback]')) { detMode = 'bedit'; renderBEdit(); return; }
+  if (e.target.closest('[data-bgo]')) { doBAct(); return; }
+});
+document.addEventListener('input', e => {
+  if (!sb) return;
+  if (e.target.id === 'bcl') sb.client = e.target.value;
+  if (e.target.id === 'bcm') sb.comment = e.target.value;
+});
 function salesHtml() {
   const mx = Math.max.apply(null, X.cats.map(c => c.units)) || 1;
   return '<div class="grid"><div class="card c6"><h3>Остатки по категориям<span>шт.</span></h3>' +
