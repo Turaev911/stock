@@ -544,10 +544,10 @@ async function doOp() {
 /* ---------- новый товар (в любой раздел, в том числе в только что созданный) — админ и редактор ---------- */
 const colNum = L => { let n = 0; for (const ch of L) n = n * 26 + ch.charCodeAt(0) - 64; return n; };
 function niFields(si) {
-  const sh = D.sheets[si], last = D.items.filter(i => i.s === si).slice(-5);
+  const sh = D.sheets[si], last = D.items.filter(i => i.s === si).reverse();
   return (sh.cols || []).map(c => {
     const i = colNum(c.col) - 1, ex = [];
-    last.forEach(it => { const v = it.v[i]; if (v !== '' && v != null && ex.indexOf(String(v)) < 0) ex.push(String(v)); });
+    for (const it of last) { const v = it.v[i]; if (v !== '' && v != null && ex.indexOf(String(v)) < 0) ex.push(String(v)); if (ex.length >= 2) break; }
     return '<div class="lbl">' + esc(c.header) + '</div><input class="inp" data-col="' + c.col + '" autocomplete="off" placeholder="' + esc(ex.slice(0, 2).map(oneLine).join(' / ')) + '">';
   }).join('');
 }
