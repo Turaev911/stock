@@ -864,10 +864,10 @@ function newHtml() {
         q.options.map(o => '<button class="chip" data-aiq="' + q.col + '" data-v="' + esc(o) + '">' + esc(o) + '</button>').join('') + '</div>' : '')).join('') +
       (dr.qs.length ? '<div class="note" style="padding:6px 0 0">Ответ можно выбрать кнопкой или вписать в поле ниже.</div>' : '') + '</div>';
   }
-  const last = D.items.filter(it => it.s === newSheet).slice(-5);
+  const last = D.items.filter(it => it.s === newSheet).reverse();
   h += '<div class="card">' + sh.cols.map(c => {
     const i = colNum(c.col) - 1;
-    const ex = []; last.forEach(it => { const v = it.v[i]; if (v !== '' && v != null && ex.indexOf(String(v)) < 0) ex.push(String(v)); });
+    const ex = []; for (const it of last) { const v = it.v[i]; if (v !== '' && v != null && ex.indexOf(String(v)) < 0) ex.push(String(v)); if (ex.length >= 2) break; }
     const val = dr && dr.fields[c.col] ? dr.fields[c.col] : '';
     const ask = dr && dr.qs.some(q => q.col === c.col);
     return '<div class="lbl">' + esc(c.header) + (ask ? ' ❓' : '') + '</div><input class="inp' + (val ? ' ai-filled' : '') + '" data-col="' + c.col + '" value="' + esc(val) +
